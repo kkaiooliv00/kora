@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { app } from './lib/state.svelte'
   import { buildCommands, matches, type Command } from './lib/commands'
 
@@ -12,9 +13,12 @@
   const commands = buildCommands()
   const results = $derived(commands.filter((c) => matches(c.label, query)).slice(0, MAX_RESULTS))
 
+  // Só ao abrir: foco com o cursor no fim do texto inicial (sem reagir a cada tecla).
   $effect(() => {
-    input?.focus()
-    input?.setSelectionRange(query.length, query.length)
+    if (!input) return
+    const end = untrack(() => query.length)
+    input.focus()
+    input.setSelectionRange(end, end)
   })
 
   $effect(() => {

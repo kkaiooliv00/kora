@@ -147,10 +147,15 @@ pub fn save_image(request: Request<'_>) -> Result<String, String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// Coloca entre aspas o que tem espaço, para a linha do `cmd /s /c`.
+/// Aspas em todo argumento da linha do `cmd /s /c`: dentro delas `& | < > ^` são literais,
+/// então um nome de pasta como `foo&calc` não vira um segundo comando.
+/// `"` e `%` são recusados (fechariam as aspas / expandiriam variáveis).
 #[cfg_attr(not(windows), allow(dead_code))]
-fn cmd_quote(arg: &str) -> String {
-    if arg.contains(' ') { format!("\"{arg}\"") } else { arg.to_string() }
+fn cmd_quote(arg: &str) -> Result<String, String> {
+    if arg.contains(['"', '%']) {
+        return Err(format!("caminho com caractere não suportado pelo cmd (\" ou %): {arg}"));
+    }
+    Ok(format!("\"{arg}\""))
 }
 
 /// Monta o processo do editor sem janela de console.
@@ -165,7 +170,10 @@ fn editor_command(program: &str, args: &[String]) -> Result<Command, String> {
         // externas, então caminhos com espaço sobrevivem.
         if prefix.first().is_some_and(|p| p == "/d") {
             let script = prefix.last().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            let line: Vec<String> = std::iter::once(script.as_str()).chain(args.iter().map(String::as_str)).map(cmd_quote).collect();
+            let line = std::iter::once(script.as_str())
+                .chain(args.iter().map(String::as_str))
+                .map(cmd_quote)
+                .collect::<Result<Vec<_>, _>>()?;
             cmd.raw_arg(format!("/d /s /c \"{}\"", line.join(" ")));
             return Ok(cmd);
         }
@@ -191,8 +199,10 @@ mod tests {
     use super::cmd_quote;
 
     #[test]
-    fn cmd_quote_wraps_only_paths_with_spaces() {
-        assert_eq!(cmd_quote(r"C:\Program Files\x.cmd"), r#""C:\Program Files\x.cmd""#);
-        assert_eq!(cmd_quote(r"C:\proj"), r"C:\proj");
+    fn cmd_quote_neutralizes_cmd_metacharacters() {
+        assert_eq!(cmd_quote(r"C:\Program Files\x.cmd").unwrap(), r#""C:\Program Files\x.cmd""#);
+        assert_eq!(cmd_quote(r"C:\dev\foo&calc").unwrap(), r#""C:\dev\foo&calc""#);
+        assert!(cmd_quote(r#"C:\a"&calc&""#).is_err());
+        assert!(cmd_quote(r"C:\%PATH%").is_err());
     }
 }

@@ -56,6 +56,8 @@
   /** Print colado vira arquivo temporário; o caminho é colado para o agente ler. */
   function pasteImage(t: Terminal) {
     return (e: ClipboardEvent) => {
+      // Excel/Word copiam texto + imagem juntos: aí o texto vence.
+      if (e.clipboardData?.types.includes('text/plain')) return
       const items = Array.from(e.clipboardData?.items ?? [])
       const image = items.find((i) => i.type.startsWith('image/'))?.getAsFile()
       if (!image) return
@@ -97,10 +99,13 @@
     let idleTimer: ReturnType<typeof setTimeout> | undefined
     let id: number | undefined
     let stopped = false
+    // Depois do unmount o processo ainda manda saída/saída-de-exit; ignorar para não ressuscitar o status.
+    let disposed = false
     const write = (data: string) => id !== undefined && invoke('pty_write', { id, data })
 
     const onData = new Channel<ArrayBuffer>()
     onData.onmessage = (buf) => {
+      if (disposed) return
       t.write(new Uint8Array(buf))
       if (!heuristic) return
       setStatus(chat.id, 'running')
@@ -109,6 +114,7 @@
     }
     const onExit = new Channel<number>()
     onExit.onmessage = (code) => {
+      if (disposed) return
       id = undefined
       stopped = true
       clearTimeout(idleTimer)
@@ -161,6 +167,7 @@
     ro.observe(el)
 
     return () => {
+      disposed = true
       ro.disconnect()
       el.removeEventListener('paste', onPaste, true)
       el.removeEventListener('focusin', onFocus)

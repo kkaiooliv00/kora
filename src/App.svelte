@@ -159,7 +159,7 @@
   </main>
 
   {#if app.modal === 'settings'}<Settings />{/if}
-  {#if app.modal === 'palette'}<Palette />{/if}
+  {#if app.modal === 'palette'}{#key app.paletteOpens}<Palette />{/key}{/if}
   {#if app.modal === 'broadcast'}<Broadcast />{/if}
   {#if app.modal === 'queue'}<Queue />{/if}
 

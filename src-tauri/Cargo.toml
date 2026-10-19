@@ -1,6 +1,6 @@
 [package]
 name = "kora"
-version = "0.2.0"
+version = "0.2.1"
 description = "Terminal leve para agentes de IA"
 authors = ["kkaiooliv00"]
 license = ""

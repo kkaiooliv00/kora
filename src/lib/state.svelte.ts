@@ -98,6 +98,7 @@ export const app = $state({
   queue: {} as Record<string, string[]>,
   modal: null as Modal | null,
   paletteQuery: '',
+  paletteOpens: 0,
   /** Chat com a barra de busca aberta. */
   searching: null as string | null,
   error: '',

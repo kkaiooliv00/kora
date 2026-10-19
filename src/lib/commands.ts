@@ -21,6 +21,8 @@ export interface Command {
 
 export function openPalette(query = '') {
   app.paletteQuery = query
+  // Remonta a paleta (via {#key}) mesmo quando ela já está aberta, ex.: "Dividir" escolhido nela.
+  app.paletteOpens += 1
   app.modal = 'palette'
 }
 
@@ -47,7 +49,7 @@ export function buildCommands(): Command[] {
     { id: 'newProject', label: 'Novo projeto', run: addProject },
     { id: 'toggleSplit', label: 'Alternar divisão lado a lado / empilhada', run: toggleDirection },
   ]
-  const snippets = activeSnippets().map((s) => ({ id: `snippet:${s.name}`, label: `Snippet: ${s.name}`, run: () => pasteSnippet(s.text) }))
+  const snippets = activeSnippets().map((s, i) => ({ id: `snippet:${i}`, label: `Snippet: ${s.name}`, run: () => pasteSnippet(s.text) }))
   const chats = app.chats.flatMap((c) => {
     const where = projectOf(c)?.name ?? ''
     return [
