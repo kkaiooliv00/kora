@@ -3,7 +3,7 @@
   import X from '@lucide/svelte/icons/x'
   import { app, type Profile, type Snippet } from './lib/state.svelte'
   import { ACTIONS } from './lib/commands'
-  import { THEMES } from './lib/themes'
+  import { THEMES, themeOf } from './lib/themes'
   import { CATEGORIES, DEFAULT_PERMISSIONS, type Permissions, type Policy } from './lib/permissions'
 
   const SECTIONS = [
@@ -26,6 +26,7 @@
   app.settingsSection = null
   let section = $state<Section>(requested ?? 'geral')
   let draft = $state({ ...app.settings })
+  const preview = $derived(themeOf(draft.theme))
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
   let keysText = $state(JSON.stringify(app.settings.keys, null, 2))
@@ -232,6 +233,10 @@
                 <option value={name}>{name}</option>
               {/each}
             </select>
+            <span class="swatches" style:background={preview.background} style:color={preview.foreground} aria-hidden="true">
+              <span class="sample">›_</span>
+              {#each [preview.red, preview.green, preview.yellow, preview.blue, preview.magenta, preview.cyan] as color, i (i)}<i style:background={color}></i>{/each}
+            </span>
           </label>
           <label class="field">
             Tamanho da fonte
@@ -444,5 +449,23 @@
     margin-top: var(--space-8);
     padding-top: var(--space-4);
     border-top: 1px solid var(--line);
+  }
+  .swatches {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+  }
+  .swatches .sample {
+    flex: 1;
+    font: 600 13px var(--font-mono);
+  }
+  .swatches i {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
   }
 </style>
