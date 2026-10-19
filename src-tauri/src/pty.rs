@@ -39,11 +39,26 @@ fn default_shell() -> String {
     }
 }
 
+/// Roda `line` dentro do shell e mantém o shell aberto quando o comando sai.
+fn command_for(line: Option<String>) -> CommandBuilder {
+    let Some(line) = line.filter(|l| !l.trim().is_empty()) else {
+        return CommandBuilder::new(default_shell());
+    };
+    if cfg!(windows) {
+        let mut cmd = CommandBuilder::new("powershell.exe");
+        cmd.args(["-NoLogo", "-NoExit", "-Command", &line]);
+        cmd
+    } else {
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.args(["-c", &format!("{line}; exec \"${{SHELL:-/bin/bash}}\" -l")]);
+        cmd
+    }
+}
+
 #[tauri::command]
 pub fn pty_spawn(
     state: State<Ptys>,
-    cmd: Option<String>,
-    args: Option<Vec<String>>,
+    line: Option<String>,
     cwd: Option<String>,
     cols: u16,
     rows: u16,
@@ -54,8 +69,7 @@ pub fn pty_spawn(
         .openpty(size(cols, rows))
         .map_err(|e| e.to_string())?;
 
-    let mut builder = CommandBuilder::new(cmd.unwrap_or_else(default_shell));
-    builder.args(args.unwrap_or_default());
+    let mut builder = command_for(line);
     if let Some(dir) = cwd {
         builder.cwd(dir);
     }

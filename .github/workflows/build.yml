@@ -44,6 +44,9 @@ jobs:
 
       - run: npm ci
       - run: npm run check
+      - name: Testes Rust
+        if: runner.os == 'Linux'
+        run: npm run build && cargo test --manifest-path src-tauri/Cargo.toml
       - run: npx tauri build --bundles ${{ matrix.bundles }}
 
       - uses: actions/upload-artifact@v4
