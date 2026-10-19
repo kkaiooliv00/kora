@@ -6,22 +6,26 @@
     removeProject,
     addGroup,
     removeGroup,
+    renameGroup,
     addChat,
     removeChat,
     renameChat,
     moveChat,
     openChat,
     splitChat,
+    closePane,
+    isOpen,
+    mostUrgent,
     type Chat,
+    type Group,
+    type Project,
   } from './lib/state.svelte'
   import { openInEditor } from './lib/automation'
+  import { openMenu, type MenuItem } from './lib/menu.svelte'
   import Plus from '@lucide/svelte/icons/plus'
-  import X from '@lucide/svelte/icons/x'
-  import FolderPlus from '@lucide/svelte/icons/folder-plus'
-  import ListPlus from '@lucide/svelte/icons/list-plus'
-  import SquarePen from '@lucide/svelte/icons/square-pen'
   import GitBranch from '@lucide/svelte/icons/git-branch'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Settings from '@lucide/svelte/icons/settings'
 
   const ICON = { size: 14, strokeWidth: 1.5 }
@@ -38,6 +42,8 @@
     const same = adding?.kind === next.kind && adding.projectId === next.projectId && adding.groupId === next.groupId
     adding = same ? null : next
     groupName = ''
+    if (next.groupId) app.collapsed[next.groupId] = false
+    app.collapsed[next.projectId] = false
   }
 
   function pickProfile(profileId: string) {
@@ -60,36 +66,105 @@
     dragged = null
   }
 
-  function finishRename(chat: Chat, value: string) {
-    renameChat(chat.id, value)
+  function finishRename(id: string, value: string, kind: 'chat' | 'group') {
+    if (kind === 'chat') renameChat(id, value)
+    else renameGroup(id, value)
     renaming = null
   }
 
+  const flip = (id: string) => (app.collapsed[id] = !app.collapsed[id])
+  const groupsOf = (project: Project) => app.groups.filter((g) => g.projectId === project.id)
+  const chatsOf = (group: Group) => app.chats.filter((c) => c.groupId === group.id)
+  const looseChats = (project: Project) => app.chats.filter((c) => c.projectId === project.id && !c.groupId)
   const allowDrop = (e: DragEvent) => e.preventDefault()
   const focus = (node: HTMLInputElement) => node.focus()
+
+  const newChatItems = (projectId: string, groupId?: string): MenuItem[] =>
+    app.profiles.map((profile) => ({ label: profile.name, run: () => addChat(projectId, profile.id, groupId) }))
+
+  function chatMenu(e: MouseEvent, chat: Chat) {
+    const groups = app.groups.filter((g) => g.projectId === chat.projectId)
+    openMenu(e, [
+      { label: 'Abrir', shortcut: '↵', run: () => openChat(chat.id) },
+      { label: 'Abrir ao lado', shortcut: 'Alt+clique', run: () => splitChat(chat.id) },
+      {
+        label: 'Adicionar à fila…',
+        run: () => {
+          openChat(chat.id)
+          app.modal = 'queue'
+        },
+      },
+      { separator: true },
+      {
+        label: 'Mover para grupo',
+        submenu: [
+          ...groups.map((g) => ({ label: g.name, disabled: chat.groupId === g.id, run: () => moveChat(chat.id, chat.projectId, g.id) })),
+          { label: 'Sem grupo', disabled: !chat.groupId, run: () => moveChat(chat.id, chat.projectId) },
+        ],
+      },
+      { label: 'Renomear', shortcut: 'F2', run: () => (renaming = chat.id) },
+      { label: 'Duplicar chat', run: () => addChat(chat.projectId, chat.profileId, chat.groupId) },
+      { separator: true },
+      { label: 'Encerrar chat', disabled: !isOpen(chat.id), run: () => closePane(chat.id) },
+      { label: 'Remover chat', danger: true, run: () => removeChat(chat.id) },
+    ])
+  }
+
+  function projectMenu(e: MouseEvent, project: Project) {
+    openMenu(e, [
+      { label: 'Novo chat', submenu: newChatItems(project.id) },
+      { label: 'Novo chat em worktree', submenu: app.profiles.map((p) => ({ label: p.name, run: () => addChat(project.id, p.id, undefined, true) })) },
+      { label: 'Novo grupo', run: () => toggle({ kind: 'group', projectId: project.id }) },
+      { separator: true },
+      { label: 'Abrir no editor', run: () => openInEditor(project.path) },
+      { separator: true },
+      { label: 'Remover projeto', danger: true, run: () => removeProject(project.id) },
+    ])
+  }
+
+  function groupMenu(e: MouseEvent, group: Group) {
+    openMenu(e, [
+      { label: 'Novo chat no grupo', submenu: newChatItems(group.projectId, group.id) },
+      { label: 'Renomear grupo', run: () => (renaming = group.id) },
+      { separator: true },
+      { label: 'Remover grupo', danger: true, run: () => removeGroup(group.id) },
+    ])
+  }
+
+  function onChatKey(e: KeyboardEvent, chat: Chat) {
+    if (e.key === 'F2') {
+      e.preventDefault()
+      renaming = chat.id
+    }
+  }
 </script>
 
-{#snippet chatRow(chat: Chat)}
+{#snippet renameInput(id: string, value: string, kind: 'chat' | 'group')}
+  <input
+    class="rename"
+    {value}
+    aria-label="Novo nome"
+    use:focus
+    onblur={(e) => finishRename(id, e.currentTarget.value, kind)}
+    onkeydown={(e) => {
+      if (e.key === 'Enter') e.currentTarget.blur()
+      if (e.key === 'Escape') renaming = null
+    }}
+  />
+{/snippet}
+
+{#snippet chevron(id: string)}
+  <span class="chevron" aria-hidden="true">
+    {#if app.collapsed[id]}<ChevronRight size={12} strokeWidth={1.5} />{:else}<ChevronDown size={12} strokeWidth={1.5} />{/if}
+  </span>
+{/snippet}
+
+{#snippet chatRow(chat: Chat, indent: number)}
   {@const status = app.status[chat.id]}
-  <li class="chat" class:active={app.active === chat.id}>
-    <span
-      class="dot"
-      class:off={!status}
-      style:--dot={status ? STATUS[status].color : 'transparent'}
-      aria-hidden="true"
-    ></span>
+  <li class="chat" class:active={app.active === chat.id} style:padding-left="{indent}px">
+    <span class="dot" class:off={!status} style:--dot={status ? STATUS[status].color : 'transparent'} aria-hidden="true"></span>
     {#if renaming === chat.id}
-      <input
-        class="rename"
-        value={chat.name}
-        aria-label="Novo nome do chat"
-        use:focus
-        onblur={(e) => finishRename(chat, e.currentTarget.value)}
-        onkeydown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur()
-          if (e.key === 'Escape') renaming = null
-        }}
-      />
+      {@render renameInput(chat.id, chat.name, 'chat')}
     {:else}
       <button
         class="label"
@@ -97,14 +172,15 @@
         ondragstart={() => (dragged = chat.id)}
         onclick={(e) => (e.altKey ? splitChat(chat.id) : openChat(chat.id))}
         ondblclick={() => (renaming = chat.id)}
-        title={`${status ? STATUS[status].label : 'fechado'} · clique abre, Alt+clique abre ao lado, duplo clique renomeia, arraste para um grupo`}
+        oncontextmenu={(e) => chatMenu(e, chat)}
+        onkeydown={(e) => onChatKey(e, chat)}
+        title={`${status ? STATUS[status].label : 'fechado'} · Alt+clique abre ao lado · botão direito para mais`}
       >
         <span class="text">{chat.name}</span>
         {#if chat.branch}<span class="branch" title={`${chat.branch} · ${chat.cwd}`}><GitBranch size={12} strokeWidth={1.5} /></span>{/if}
-        {#if status && status !== 'idle'}<span class="glyph" style:color={STATUS[status].color}>{STATUS[status].glyph}</span>{/if}
+        {#if status === 'waiting'}<span class="waiting" aria-label="aguardando você">!</span>{/if}
       </button>
     {/if}
-    <button class="icon-btn hover" title="Remover chat" aria-label="Remover chat" onclick={() => removeChat(chat.id)}><X {...ICON} /></button>
   </li>
 {/snippet}
 
@@ -137,45 +213,72 @@
 <aside>
   <header>
     <p class="overline">projetos</p>
-    <button class="icon-btn" title="Abrir pasta como projeto" aria-label="Novo projeto" onclick={addProject}><FolderPlus {...ICON} /></button>
+    <button class="icon-btn" title="Abrir pasta como projeto" aria-label="Novo projeto" onclick={addProject}><Plus {...ICON} /></button>
   </header>
 
   <div class="tree">
     {#each app.projects as project (project.id)}
+      {@const projectChats = app.chats.filter((c) => c.projectId === project.id)}
       <section ondragover={allowDrop} ondrop={(e) => drop(e, project.id)} aria-label={project.name}>
-        <div class="row project">
-          <span class="name" title={project.path}>{project.name}</span>
+        <div class="row project" oncontextmenu={(e) => projectMenu(e, project)} role="presentation">
+          <button class="toggle" aria-expanded={!app.collapsed[project.id]} onclick={() => flip(project.id)} title={project.path}>
+            {@render chevron(project.id)}
+            <span class="name">{project.name}</span>
+            {#if app.collapsed[project.id]}
+              {@const urgent = mostUrgent(projectChats.map((c) => c.id))}
+              {#if urgent}<span class="dot" style:--dot={STATUS[urgent].color} aria-label={STATUS[urgent].label}></span>{/if}
+              <span class="count">{projectChats.length}</span>
+            {/if}
+          </button>
           <button class="icon-btn hover" title="Novo chat" aria-label="Novo chat" onclick={() => toggle({ kind: 'chat', projectId: project.id })}><Plus {...ICON} /></button>
-          <button class="icon-btn hover" title="Novo grupo" aria-label="Novo grupo" onclick={() => toggle({ kind: 'group', projectId: project.id })}><ListPlus {...ICON} /></button>
-          <button class="icon-btn hover" title="Abrir no editor" aria-label="Abrir no editor" onclick={() => openInEditor(project.path)}><SquarePen {...ICON} /></button>
-          <button class="icon-btn hover" title="Remover projeto" aria-label="Remover projeto" onclick={() => removeProject(project.id)}><X {...ICON} /></button>
         </div>
         {@render picker(project.id)}
 
-        {#each app.groups.filter((g) => g.projectId === project.id) as group (group.id)}
-          <div class="group" role="group" aria-label={group.name} ondragover={allowDrop} ondrop={(e) => drop(e, project.id, group.id)}>
-            <div class="row">
-              <span class="name group-name"><ChevronDown size={12} strokeWidth={1.5} /> {group.name}</span>
-              <button class="icon-btn hover" title="Novo chat no grupo" aria-label="Novo chat no grupo" onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: group.id })}><Plus {...ICON} /></button>
-              <button class="icon-btn hover" title="Remover grupo (os chats ficam)" aria-label="Remover grupo" onclick={() => removeGroup(group.id)}><X {...ICON} /></button>
+        {#if !app.collapsed[project.id]}
+          {#each groupsOf(project) as group (group.id)}
+            {@const chats = chatsOf(group)}
+            <div class="group" role="group" aria-label={group.name} ondragover={allowDrop} ondrop={(e) => drop(e, project.id, group.id)}>
+              <div class="row group-row" oncontextmenu={(e) => groupMenu(e, group)} role="presentation">
+                {#if renaming === group.id}
+                  {@render renameInput(group.id, group.name, 'group')}
+                {:else}
+                  <button class="toggle" aria-expanded={!app.collapsed[group.id]} onclick={() => flip(group.id)}>
+                    {@render chevron(group.id)}
+                    <span class="name group-name">{group.name}</span>
+                    {#if app.collapsed[group.id]}
+                      {@const urgent = mostUrgent(chats.map((c) => c.id))}
+                      {#if urgent}<span class="dot" style:--dot={STATUS[urgent].color} aria-label={STATUS[urgent].label}></span>{/if}
+                    {/if}
+                    <span class="count">{chats.length}</span>
+                  </button>
+                {/if}
+                <button
+                  class="icon-btn hover"
+                  title="Novo chat no grupo"
+                  aria-label="Novo chat no grupo"
+                  onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: group.id })}><Plus {...ICON} /></button
+                >
+              </div>
+              {@render picker(project.id, group.id)}
+              {#if !app.collapsed[group.id]}
+                <ul>
+                  {#each chats as chat (chat.id)}
+                    {@render chatRow(chat, 28)}
+                  {/each}
+                </ul>
+              {/if}
             </div>
-            {@render picker(project.id, group.id)}
-            <ul>
-              {#each app.chats.filter((c) => c.groupId === group.id) as chat (chat.id)}
-                {@render chatRow(chat)}
-              {/each}
-            </ul>
-          </div>
-        {/each}
-
-        <ul>
-          {#each app.chats.filter((c) => c.projectId === project.id && !c.groupId) as chat (chat.id)}
-            {@render chatRow(chat)}
           {/each}
-        </ul>
+
+          <ul>
+            {#each looseChats(project) as chat (chat.id)}
+              {@render chatRow(chat, 16)}
+            {/each}
+          </ul>
+        {/if}
       </section>
     {:else}
-      <p class="hint">Nenhum projeto ainda. Abra uma pasta para começar.</p>
+      <p class="hint">Nenhum projeto ainda. Use <b>+</b> para abrir uma pasta.</p>
     {/each}
   </div>
 
@@ -201,26 +304,37 @@
   .tree {
     flex: 1;
     overflow-y: auto;
-    padding: 0 var(--space-3) var(--space-3);
+    padding: 0 var(--space-2) var(--space-3);
   }
   section {
-    padding: var(--space-2) 0;
-  }
-  section + section {
-    border-top: 1px solid var(--line);
+    padding-bottom: var(--space-2);
   }
   .row {
     display: flex;
     align-items: center;
     gap: 2px;
-    min-height: 28px;
-    padding-left: var(--space-2);
+    height: 28px;
     border-radius: var(--radius-md);
   }
-  .project .name {
-    font-size: 13px;
-    line-height: 18px;
-    font-weight: 600;
+  .row:hover,
+  .chat:hover {
+    background: var(--bg-200);
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0 var(--space-2) 0 var(--space-1);
+    text-align: left;
+  }
+  .chevron {
+    display: inline-grid;
+    place-items: center;
+    width: 16px;
+    color: var(--ink-muted);
   }
   .name {
     flex: 1;
@@ -229,17 +343,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .group {
-    margin-left: var(--space-2);
+  .project .name {
+    font: 600 13px/18px var(--font-mono);
+    color: var(--ink);
+  }
+  .group-row {
+    margin-left: 12px;
   }
   .group-name {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font: 500 12px/16px var(--font-sans);
+    color: var(--ink-muted);
+  }
+  .count {
+    font: 11px var(--font-mono);
     color: var(--ink-muted);
   }
   ul {
@@ -251,16 +367,13 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    height: 32px;
-    padding-left: var(--space-2);
+    height: 28px;
+    padding-right: var(--space-2);
     border-radius: var(--radius-md);
     transition: background-color 120ms ease-out;
   }
-  .chat:hover,
-  .row:hover {
-    background: var(--bg-200);
-  }
-  .chat.active {
+  .chat.active,
+  .chat.active:hover {
     background: var(--bg-300);
   }
   .dot {
@@ -280,8 +393,7 @@
     flex: 1;
     min-width: 0;
     height: 100%;
-    font-family: var(--font-mono);
-    font-size: 13px;
+    font: 12px var(--font-mono);
     text-align: left;
     color: var(--ink);
   }
@@ -294,17 +406,15 @@
     display: inline-flex;
     color: var(--accent);
   }
-  .glyph {
+  .waiting {
     margin-left: auto;
-    padding-right: var(--space-1);
-    font-family: var(--font-mono);
-    font-weight: 600;
+    font: 600 12px var(--font-mono);
+    color: var(--warning);
   }
   .icon-btn.hover {
     opacity: 0;
   }
   .row:hover .icon-btn.hover,
-  .chat:hover .icon-btn.hover,
   .icon-btn.hover:focus-visible {
     opacity: 1;
   }
@@ -312,7 +422,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-1);
-    margin: var(--space-1) 0 var(--space-2) var(--space-2);
+    margin: var(--space-1) 0 var(--space-2) var(--space-6);
   }
   .picker .input {
     flex: 1;
@@ -335,7 +445,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-000);
     color: var(--ink);
-    font: 13px var(--font-mono);
+    font: 12px var(--font-mono);
     outline: none;
   }
   .hint {

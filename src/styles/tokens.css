@@ -1,4 +1,6 @@
-/* Kora — tokens do design handoff (fonte da verdade: tokens.json do pacote de design) */
+/* Kora — tokens do design handoff (fonte da verdade: tokens.json do pacote de design).
+   As classes de tipografia do pacote (.title, .label, .body…) ficaram de fora: colidem com classes
+   dos componentes. Os mesmos valores estão aplicados direto em cada componente. */
 :root, [data-theme="dark"] {
   --bg-000: #0a0e11;
   --bg-100: #0f1519;
@@ -37,16 +39,6 @@
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-.display { font-family: var(--font-mono); font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -0.02em; }
-.title { font-family: var(--font-mono); font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
-.heading { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 600; }
-.body { font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 400; }
-.label { font-family: var(--font-sans); font-size: 13px; line-height: 18px; font-weight: 500; }
-.caption { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 400; }
-.term { font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400; }
-.term-strong { font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 600; }
-.kbd { font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.02em; }
-.overline { font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.08em; }
 @font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
 @font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }

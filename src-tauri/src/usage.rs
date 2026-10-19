@@ -36,6 +36,10 @@ impl Tokens {
 #[derive(Serialize)]
 pub struct Row {
     day: String,
+    /// Hora UTC (0-23) do registro.
+    hour: u8,
+    /// Sessão (nome do arquivo de log), para ligar o uso ao chat do Kora.
+    session: String,
     source: &'static str,
     model: String,
     project: String,
@@ -51,15 +55,23 @@ pub struct Usage {
 #[derive(Debug, PartialEq)]
 struct Entry {
     day: String,
+    hour: u8,
     model: String,
     project: String,
     tokens: Tokens,
 }
 
-type Key = (String, &'static str, String, String);
+type Key = (String, u8, String, &'static str, String, String);
 
 fn num(v: &Value, key: &str) -> u64 {
     v.get(key).and_then(Value::as_u64).unwrap_or(0)
+}
+
+/// "2026-10-19T12:34:56Z" → ("2026-10-19", 12).
+fn day_hour(timestamp: &str) -> Option<(String, u8)> {
+    let day = timestamp.get(..10)?.to_string();
+    let hour = timestamp.get(11..13)?.parse().ok()?;
+    Some((day, hour))
 }
 
 fn last_segment(path: &str) -> String {
@@ -71,7 +83,7 @@ fn last_segment(path: &str) -> String {
 fn claude_entry(v: &Value) -> Option<(String, Entry)> {
     let message = v.get("message")?;
     let usage = message.get("usage")?;
-    let day = v.get("timestamp")?.as_str()?.get(..10)?.to_string();
+    let (day, hour) = day_hour(v.get("timestamp")?.as_str()?)?;
     let tokens = Tokens {
         input: num(usage, "input_tokens"),
         output: num(usage, "output_tokens"),
@@ -85,7 +97,7 @@ fn claude_entry(v: &Value) -> Option<(String, Entry)> {
     let key = format!("{}:{}", text(message.get("id")), text(v.get("requestId")));
     let model = text(message.get("model"));
     let project = last_segment(&text(v.get("cwd")));
-    Some((key, Entry { day, model, project, tokens }))
+    Some((key, Entry { day, hour, model, project, tokens }))
 }
 
 /// Estado por arquivo do Codex: o modelo e a pasta vêm em linhas anteriores ao `token_count`.
@@ -115,8 +127,8 @@ fn codex_entry(v: &Value, file: &mut CodexFile) -> Option<Entry> {
                 cache_write: 0,
                 cache_read: cached,
             };
-            let day = v.get("timestamp")?.as_str()?.get(..10)?.to_string();
-            Some(Entry { day, model: file.model.clone(), project: file.project.clone(), tokens })
+            let (day, hour) = day_hour(v.get("timestamp")?.as_str()?)?;
+            Some(Entry { day, hour, model: file.model.clone(), project: file.project.clone(), tokens })
         }
         _ => None,
     }
@@ -146,18 +158,20 @@ fn read_lines(path: &Path) -> impl Iterator<Item = Value> {
 fn summarize(home: &Path, days: u32) -> Usage {
     let since = SystemTime::now() - DAY * days;
     let mut totals: HashMap<Key, Tokens> = HashMap::new();
-    let mut add = |source: &'static str, e: Entry| {
-        totals.entry((e.day, source, e.model, e.project)).or_default().add(e.tokens);
+    let mut add = |source: &'static str, session: &str, e: Entry| {
+        totals.entry((e.day, e.hour, session.to_string(), source, e.model, e.project)).or_default().add(e.tokens);
     };
+    let session_of = |path: &Path| path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
 
     let claude_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|| home.join(".claude"));
     let mut claude_files = Vec::new();
     recent_jsonl(&claude_dir.join("projects"), since, 0, &mut claude_files);
     let mut seen = HashSet::new();
     for path in &claude_files {
+        let session = session_of(path);
         for (key, entry) in read_lines(path).filter_map(|v| claude_entry(&v)) {
             if key == ":" || seen.insert(key) {
-                add("claude", entry);
+                add("claude", &session, entry);
             }
         }
     }
@@ -166,17 +180,18 @@ fn summarize(home: &Path, days: u32) -> Usage {
     let mut codex_files = Vec::new();
     recent_jsonl(&codex_dir.join("sessions"), since, 0, &mut codex_files);
     for path in &codex_files {
+        let session = session_of(path);
         let mut file = CodexFile::default();
         for value in read_lines(path) {
             if let Some(entry) = codex_entry(&value, &mut file) {
-                add("codex", entry);
+                add("codex", &session, entry);
             }
         }
     }
 
     let mut rows: Vec<Row> = totals
         .into_iter()
-        .map(|((day, source, model, project), tokens)| Row { day, source, model, project, tokens })
+        .map(|((day, hour, session, source, model, project), tokens)| Row { day, hour, session, source, model, project, tokens })
         .collect();
     rows.sort_by(|a, b| b.day.cmp(&a.day).then(a.source.cmp(b.source)));
     Usage { rows, files: claude_files.len() + codex_files.len() }
@@ -207,6 +222,7 @@ mod tests {
         let (key, entry) = claude_entry(&line).unwrap();
         assert_eq!(key, "m1:r1");
         assert_eq!(entry.day, "2026-10-19");
+        assert_eq!(entry.hour, 12);
         assert_eq!(entry.project, "kora");
         assert_eq!(entry.tokens, Tokens { input: 10, output: 5, cache_write: 3, cache_read: 100 });
         let empty: Value = serde_json::from_str(r#"{"timestamp":"2026-10-19T00:00:00Z","message":{"usage":{}}}"#).unwrap();
@@ -230,6 +246,7 @@ mod tests {
             entries,
             vec![Entry {
                 day: "2026-10-18".into(),
+                hour: 9,
                 model: "gpt-x".into(),
                 project: "app".into(),
                 tokens: Tokens { input: 30, output: 7, cache_write: 0, cache_read: 20 },

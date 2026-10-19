@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app, chatById } from './lib/state.svelte'
   import { CATEGORIES, type Policy } from './lib/permissions'
+  import EmptyState from './EmptyState.svelte'
 
   // Janela de contexto padrão do Claude; acima disso o modelo é de 1M (variante [1m]).
   const DEFAULT_WINDOW = 200_000
@@ -25,10 +26,12 @@
 
 <aside class="panel" aria-label="Painel do agente">
   {#if !chat}
-    <p class="muted">Abra um chat para ver o plano e o contexto do agente.</p>
+    <EmptyState kind="empty" title="Nenhum chat em foco" compact>Abra um chat para ver o plano e o contexto do agente.</EmptyState>
   {:else if !isClaude}
     <p class="overline">agente</p>
-    <p class="muted">O painel usa os hooks do Claude. Para {chat.name}, acompanhe pelo terminal.</p>
+    <EmptyState kind="empty" title="Painel indisponível para este agente" compact>
+      O plano e o contexto vêm dos hooks do Claude. Acompanhe {chat.name} pelo terminal.
+    </EmptyState>
   {:else}
     <section>
       <p class="overline">plano</p>
@@ -42,7 +45,9 @@
           {/each}
         </ul>
       {:else}
-        <p class="muted">O agente ainda não montou um plano nesta sessão.</p>
+        <EmptyState kind="empty" title="Sem plano ainda" compact>
+          O agente monta um plano quando a tarefa tem mais de um passo. Peça algo maior ou peça um plano.
+        </EmptyState>
       {/if}
     </section>
 
@@ -70,7 +75,7 @@
           {contextPct}% da janela de contexto usada ({compact.format(info.context.tokens)} de {compact.format(contextWindow)} tokens)
         </p>
       {:else}
-        <p class="muted">Aparece depois da primeira resposta do agente.</p>
+        <EmptyState kind="empty" title="Sem dados de contexto" compact>Aparece depois da primeira resposta do agente.</EmptyState>
       {/if}
     </section>
   {/if}

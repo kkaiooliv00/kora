@@ -1,67 +1,42 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core'
-  import { app } from './lib/state.svelte'
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left'
+  import EmptyState from './EmptyState.svelte'
+  import Skeleton from './Skeleton.svelte'
+  import UsageLine from './UsageLine.svelte'
+  import UsageBars from './UsageBars.svelte'
+  import { app, whereOf } from './lib/state.svelte'
+  import { between, byChat, DAY_MS, HOUR_MS, series, startOfDay, sum, totalOf, type UsageRow } from './lib/usage'
 
-  interface Tokens {
-    input: number
-    output: number
-    cacheWrite: number
-    cacheRead: number
-  }
-  interface Row {
-    day: string
-    source: 'claude' | 'codex'
-    model: string
-    project: string
-    tokens: Tokens
-  }
+  const PERIODS = [
+    { days: 1, label: 'Hoje' },
+    { days: 7, label: '7 dias' },
+    { days: 30, label: '30 dias' },
+  ]
+  const PAGE_SIZE = 6
+  // O Rust lê no máximo 90 dias; o período anterior serve de comparação.
+  const MAX_DAYS = 90
 
-  const PERIODS = [1, 7, 30]
-  const SOURCES = { claude: 'Claude', codex: 'Codex' } as const
-
-  let days = $state(7)
-  let rows = $state<Row[]>([])
-  let files = $state(0)
-  let loading = $state(false)
+  let days = $state(1)
+  let project = $state('')
+  let rows = $state<UsageRow[]>([])
+  let loading = $state(true)
   let error = $state('')
+  let updatedAt = $state<Date | null>(null)
+  let page = $state(0)
 
-  const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
-  const fmt = (n: number) => compact.format(n)
-  const sum = (list: Tokens[]): Tokens =>
-    list.reduce(
-      (acc, t) => ({
-        input: acc.input + t.input,
-        output: acc.output + t.output,
-        cacheWrite: acc.cacheWrite + t.cacheWrite,
-        cacheRead: acc.cacheRead + t.cacheRead,
-      }),
-      { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 },
-    )
-
-  function groupBy(key: (r: Row) => string): { label: string; tokens: Tokens }[] {
-    const groups = new Map<string, Tokens[]>()
-    rows.forEach((r) => groups.set(key(r), [...(groups.get(key(r)) ?? []), r.tokens]))
-    return [...groups.entries()]
-      .map(([label, list]) => ({ label, tokens: sum(list) }))
-      .sort((a, b) => b.tokens.input + b.tokens.output - (a.tokens.input + a.tokens.output))
-  }
-
-  const bySource = $derived(groupBy((r) => SOURCES[r.source]))
-  const byDay = $derived(groupBy((r) => r.day).sort((a, b) => b.label.localeCompare(a.label)))
-  const byModel = $derived(groupBy((r) => `${SOURCES[r.source]} · ${r.model || '?'}`))
-  const byProject = $derived(groupBy((r) => r.project || '?'))
-  const maxDay = $derived(Math.max(1, ...byDay.map((d) => d.tokens.input + d.tokens.output)))
+  const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 2 })
+  const percent = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 0 })
+  const time = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const dayLabel = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' })
 
   async function refresh() {
     loading = true
     error = ''
     try {
-      const usage = await invoke<{ rows: Row[]; files: number }>('usage_summary', { days })
-      // O Rust escolhe arquivos por data de modificação; uma sessão antiga retomada hoje traz
-      // dias de fora do período. Corte em UTC, como os dias que vêm do log.
-      const cutoff = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10)
-      rows = usage.rows.filter((r) => r.day >= cutoff)
-      files = usage.files
+      const usage = await invoke<{ rows: UsageRow[]; files: number }>('usage_summary', { days: Math.min(MAX_DAYS, days * 2 + 1) })
+      rows = usage.rows
+      updatedAt = new Date()
     } catch (e) {
       error = String(e)
     } finally {
@@ -71,173 +46,335 @@
 
   $effect(() => {
     void days
+    page = 0
     refresh()
   })
+
+  const now = $derived(updatedAt?.getTime() ?? Date.now())
+  const from = $derived(startOfDay(days - 1, now))
+  const filtered = $derived(project ? rows.filter((r) => r.project === project) : rows)
+  const current = $derived(between(filtered, from, now + HOUR_MS))
+  // Hoje compara com ontem até o mesmo horário; 7/30 dias com o período anterior inteiro.
+  const previous = $derived(between(filtered, from - days * DAY_MS, days === 1 ? now - DAY_MS : from))
+  const totals = $derived(sum(current))
+  const total = $derived(totalOf(totals))
+  const previousTotal = $derived(totalOf(sum(previous)))
+  const delta = $derived(previousTotal ? (total - previousTotal) / previousTotal : null)
+  const chats = $derived(byChat(current, app.chats, whereOf))
+  const projects = $derived(new Set(current.map((r) => r.project)).size)
+  const projectNames = $derived([...new Set(rows.map((r) => r.project).filter(Boolean))].sort())
+
+  // Hoje: por hora até agora; 7/30 dias: por dia.
+  const chart = $derived.by(() => {
+    if (days === 1) {
+      const hours = new Date(now).getHours() + 1
+      return {
+        current: series(current, from, HOUR_MS, hours),
+        previous: series(filtered, from - DAY_MS, HOUR_MS, hours),
+        labels: Array.from({ length: hours }, (_, h) => `${String(h).padStart(2, '0')}h`),
+        currentName: 'hoje',
+        previousName: 'ontem',
+        title: 'Como o consumo evoluiu hoje?',
+        sub: 'Tokens por hora, entrada + saída',
+      }
+    }
+    return {
+      current: series(current, from, DAY_MS, days),
+      previous: series(previous, from - days * DAY_MS, DAY_MS, days),
+      labels: Array.from({ length: days }, (_, i) => dayLabel.format(new Date(from + i * DAY_MS))),
+      currentName: `últimos ${days} dias`,
+      previousName: `${days} dias anteriores`,
+      title: `Como o consumo evoluiu em ${days} dias?`,
+      sub: 'Tokens por dia, entrada + saída',
+    }
+  })
+
+  const pages = $derived(Math.max(1, Math.ceil(chats.length / PAGE_SIZE)))
+  const visible = $derived(chats.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE))
+  const periodName = $derived(PERIODS.find((p) => p.days === days)?.label ?? '')
+
+  function ago(ms: number): string {
+    const minutes = Math.round((now - ms) / 60_000)
+    if (minutes < 5) return 'agora'
+    if (minutes < 60) return `há ${minutes} min`
+    const hours = Math.round(minutes / 60)
+    return hours < 24 ? `há ${hours} h` : `há ${Math.round(hours / 24)} dias`
+  }
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
 
-{#snippet table(title: string, groups: { label: string; tokens: Tokens }[])}
-  <section>
-    <h3>{title}</h3>
-    <table>
-      <thead>
-        <tr><th></th><th>entrada</th><th>saída</th><th>cache (gravação)</th><th>cache (leitura)</th></tr>
-      </thead>
-      <tbody>
-        {#each groups as g (g.label)}
-          <tr>
-            <td class="label">{g.label}</td>
-            <td>{fmt(g.tokens.input)}</td>
-            <td>{fmt(g.tokens.output)}</td>
-            <td>{fmt(g.tokens.cacheWrite)}</td>
-            <td>{fmt(g.tokens.cacheRead)}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </section>
-{/snippet}
+<div class="page" role="dialog" aria-modal="true" aria-label="Uso de tokens">
+  <header>
+    <button class="icon-btn" aria-label="Voltar" title="Voltar (Esc)" onclick={() => (app.modal = null)}>
+      <ChevronLeft size={16} strokeWidth={1.5} />
+    </button>
+    <h1>uso de tokens</h1>
+    <span class="spacer"></span>
+    <div class="segmented" role="radiogroup" aria-label="Período">
+      {#each PERIODS as p (p.days)}
+        <button role="radio" aria-checked={days === p.days} class:on={days === p.days} onclick={() => (days = p.days)}>{p.label}</button>
+      {/each}
+    </div>
+    <select class="input mono project" bind:value={project} aria-label="Projeto">
+      <option value="">Todos os projetos</option>
+      {#each projectNames as name (name)}<option value={name}>{name}</option>{/each}
+    </select>
+    {#if updatedAt}<span class="updated">Atualizado às {time.format(updatedAt)}</span>{/if}
+  </header>
 
-<div class="backdrop">
-  <div class="modal usage" role="dialog" aria-modal="true" aria-label="Uso de tokens">
-    <header>
-      <div>
-        <h2>Uso de tokens</h2>
-        <p class="sub">Lido dos logs locais do Claude Code e do Codex ({files} arquivos). Nada sai da máquina.</p>
-      </div>
-      <div class="periods" role="group" aria-label="Período">
-        {#each PERIODS as p (p)}
-          <button class="btn" class:primary={days === p} onclick={() => (days = p)}>{p === 1 ? 'hoje' : `${p} dias`}</button>
-        {/each}
-      </div>
-      <button class="btn" onclick={() => (app.modal = null)}>Fechar</button>
-    </header>
-
+  <main>
     {#if error}
-      <p class="error" role="alert">{error}</p>
+      <section class="card">
+        <EmptyState kind="error" title="Não foi possível ler o uso" detail={error}>
+          Os logs locais do Claude e do Codex não puderam ser lidos. Os dados não foram perdidos.
+          {#snippet actions()}<button class="btn sm" onclick={refresh}>Tentar de novo</button>{/snippet}
+        </EmptyState>
+      </section>
     {:else if loading && rows.length === 0}
-      <p class="sub">Lendo logs…</p>
-    {:else if rows.length === 0}
-      <p class="sub">Nenhum uso registrado nesse período.</p>
+      <div class="kpis">
+        {#each [0, 1, 2, 3] as i (i)}<div class="card kpi"><Skeleton lines={2} widths={['50%', '70%']} /></div>{/each}
+      </div>
+      <section class="card"><Skeleton lines={4} /><p class="hint">Carregando uso de {periodName.toLowerCase()}…</p></section>
+    {:else if total === 0}
+      <section class="card">
+        <EmptyState kind="empty" title="Sem uso neste período">
+          Nenhum chat consumiu tokens {days === 1 ? 'hoje' : `nos últimos ${days} dias`}. O histórico dos outros períodos continua disponível.
+          {#snippet actions()}
+            {#if days === 1}<button class="btn sm" onclick={() => (days = 7)}>Ver últimos 7 dias</button>{/if}
+          {/snippet}
+        </EmptyState>
+      </section>
     {:else}
-      <div class="cards">
-        {#each bySource as s (s.label)}
-          <div class="card">
-            <span class="sub">{s.label}</span>
-            <strong>{fmt(s.tokens.input + s.tokens.output)}</strong>
-            <span class="sub">entrada + saída · {fmt(s.tokens.cacheRead)} lidos do cache</span>
-          </div>
-        {/each}
+      <div class="kpis">
+        <div class="card kpi">
+          <span class="kpi-label">Tokens {days === 1 ? 'hoje' : `em ${days} dias`} (entrada + saída)</span>
+          <strong>{compact.format(total)}</strong>
+          {#if delta !== null}
+            <span class="kpi-sub">{delta >= 0 ? '▲' : '▼'} {percent.format(Math.abs(delta))} vs {days === 1 ? 'ontem no mesmo horário' : 'período anterior'}</span>
+          {/if}
+        </div>
+        <div class="card kpi">
+          <span class="kpi-label">Entrada</span>
+          <strong>{compact.format(totals.input)}</strong>
+          <span class="kpi-sub">{percent.format(totals.input / total)} do total · {compact.format(totals.cacheRead)} lidos do cache</span>
+        </div>
+        <div class="card kpi">
+          <span class="kpi-label">Saída</span>
+          <strong>{compact.format(totals.output)}</strong>
+          <span class="kpi-sub">{percent.format(totals.output / total)} do total</span>
+        </div>
+        <div class="card kpi">
+          <span class="kpi-label">Chats com uso</span>
+          <strong>{chats.length}</strong>
+          <span class="kpi-sub">em {projects} {projects === 1 ? 'projeto' : 'projetos'}</span>
+        </div>
       </div>
 
-      <section>
-        <h3>Por dia (entrada + saída)</h3>
-        {#each byDay as d (d.label)}
-          {@const total = d.tokens.input + d.tokens.output}
-          <div class="bar-row">
-            <span class="label">{d.label.slice(8, 10)}/{d.label.slice(5, 7)}</span>
-            <div class="bar"><div style:width="{(total / maxDay) * 100}%"></div></div>
-            <span>{fmt(total)}</span>
-          </div>
-        {/each}
-      </section>
+      <div class="charts">
+        <section class="card">
+          <h2>{chart.title}</h2>
+          <p class="hint">{chart.sub}</p>
+          <UsageLine
+            current={chart.current}
+            previous={chart.previous}
+            labels={chart.labels}
+            currentName={chart.currentName}
+            previousName={chart.previousName}
+          />
+        </section>
+        <section class="card">
+          <h2>Qual chat mais consumiu?</h2>
+          <p class="hint">Top 5 + demais, tokens totais</p>
+          <UsageBars {chats} />
+        </section>
+      </div>
 
-      {@render table('Por modelo', byModel)}
-      {@render table('Por projeto', byProject)}
+      <section class="card table-card">
+        <div class="table-head">
+          <h2>Uso por chat</h2>
+          <span class="hint">
+            Mostrando {page * PAGE_SIZE + 1}–{Math.min(chats.length, (page + 1) * PAGE_SIZE)} de {chats.length} · {periodName} · {project || 'Todos os projetos'}
+          </span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Chat</th>
+              <th>Projeto / grupo</th>
+              <th class="num">Entrada (tokens)</th>
+              <th class="num">Saída (tokens)</th>
+              <th class="num">Total ▼</th>
+              <th>Última atividade</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visible as chat (chat.key)}
+              <tr>
+                <td class="mono">{chat.label}</td>
+                <td class="muted">{chat.where}</td>
+                <td class="num mono">{compact.format(chat.input)}</td>
+                <td class="num mono">{compact.format(chat.output)}</td>
+                <td class="num mono strong">{compact.format(chat.total)}</td>
+                <td class="muted">{ago(chat.last)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        {#if pages > 1}
+          <div class="pager">
+            <button class="btn sm" disabled={page === 0} onclick={() => (page -= 1)}>Anterior</button>
+            <button class="btn sm" disabled={page >= pages - 1} onclick={() => (page += 1)}>Próxima</button>
+          </div>
+        {/if}
+      </section>
     {/if}
-  </div>
+  </main>
 </div>
 
 <style>
-  .usage {
-    width: min(860px, calc(100vw - 32px));
+  .page {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-rows: 44px 1fr;
+    background: var(--bg-100);
+    z-index: 15;
   }
   header {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-4) 0 var(--space-3);
+    border-bottom: 1px solid var(--line);
   }
-  header > div:first-child {
+  h1 {
+    margin: 0;
+    font: 600 14px var(--font-mono);
+  }
+  .spacer {
     flex: 1;
   }
-  .periods {
-    display: flex;
-    gap: 4px;
+  .segmented {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius-md);
   }
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 10px;
-    margin: 6px 0 18px;
-  }
-  .card {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--bg-000);
-  }
-  .card .sub {
-    margin: 0;
-  }
-  .card strong {
-    font-size: 24px;
-    font-variant-numeric: tabular-nums;
-  }
-  section {
-    margin-bottom: 18px;
-  }
-  h3 {
-    margin: 0 0 8px;
+  .segmented button {
+    height: 26px;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-sm);
     font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
     color: var(--ink-muted);
   }
-  .bar-row {
+  .segmented button.on {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 500;
+  }
+  .project {
+    height: 32px;
+    min-height: 32px;
+  }
+  .updated {
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  main {
+    overflow-y: auto;
+    padding: var(--space-6) clamp(16px, 7vw, 104px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+  .card {
+    padding: var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--bg-200);
+  }
+  .kpis {
     display: grid;
-    grid-template-columns: 48px 1fr 64px;
-    align-items: center;
-    gap: 10px;
-    padding: 3px 0;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-4);
+  }
+  .kpi {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .kpi-label,
+  .kpi-sub {
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  .kpi strong {
+    font: 600 26px/34px var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
-  .bar {
-    height: 10px;
-    border-radius: 5px;
-    background: var(--bg-300);
-    overflow: hidden;
+  .charts {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: var(--space-4);
   }
-  .bar div {
-    height: 100%;
-    border-radius: 5px;
-    background: var(--accent);
+  h2 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 22px;
+    font-weight: 600;
+  }
+  .hint {
+    margin: var(--space-1) 0 var(--space-6);
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  .table-card {
+    padding: 0;
+  }
+  .table-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: var(--space-4);
+  }
+  .table-head .hint {
+    margin: 0;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    font-variant-numeric: tabular-nums;
+    font-size: 13px;
   }
   th,
   td {
-    padding: 6px 8px;
-    text-align: right;
-    border-bottom: 1px solid var(--line);
+    padding: 10px var(--space-4);
+    border-top: 1px solid var(--line);
+    text-align: left;
   }
   th {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     color: var(--ink-muted);
   }
-  .label {
-    text-align: left;
-    max-width: 280px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .mono {
+    font-family: var(--font-mono);
+  }
+  .strong {
+    font-weight: 600;
+  }
+  .muted {
+    color: var(--ink-muted);
+  }
+  .pager {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--line);
   }
 </style>

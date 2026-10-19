@@ -7,7 +7,9 @@
   import { SearchAddon } from '@xterm/addon-search'
   import { invoke, Channel } from '@tauri-apps/api/core'
   import '@xterm/xterm/css/xterm.css'
-  import { app, chatDir, fail, focusChat, updateChat, type Chat } from './lib/state.svelte'
+  import { app, chatDir, fail, focusChat, openChat, updateChat, type Chat } from './lib/state.svelte'
+  import { toast } from './lib/toasts.svelte'
+  import EmptyState from './EmptyState.svelte'
   import { clearPermission, noteHumanInput, setStatus } from './lib/automation'
   import { terminals } from './lib/terminals'
   import { splitCommand } from './lib/command'
@@ -53,8 +55,17 @@
   const profile = app.profiles.find((p) => p.id === chat.profileId)
   const label = profile?.command ? splitCommand(profile.command)[0] : 'shell'
 
-  async function spawnArgs(): Promise<{ program: string | null; args: string[]; resumed: boolean }> {
-    const [program, ...args] = splitCommand(profile?.command ?? '')
+  // Abaixo disso a tela de "iniciando" nem aparece (regra do design).
+  const STARTING_DELAY_MS = 300
+
+  /** Fases do painel antes do terminal: abrindo o agente ou falha ao abrir. */
+  let phase = $state<'starting' | 'ready' | 'failed'>('starting')
+  let showStarting = $state(false)
+  let failure = $state('')
+  let restart: (shellOnly?: boolean) => void = () => {}
+
+  async function spawnArgs(shellOnly = false): Promise<{ program: string | null; args: string[]; resumed: boolean }> {
+    const [program, ...args] = shellOnly ? [] : splitCommand(profile?.command ?? '')
     if (!program) return { program: null, args: [], resumed: false }
     const isClaude = profile?.hooks === 'claude'
     if (isClaude) {
@@ -154,6 +165,7 @@
     const onData = new Channel<ArrayBuffer>()
     onData.onmessage = (buf) => {
       if (disposed) return
+      phase = 'ready'
       t.write(new Uint8Array(buf))
       if (app.pendingPrompt[chat.id]) {
         clearTimeout(promptTimer)
@@ -192,13 +204,15 @@
     }
 
     const cwd = chatDir(chat)
-    function start() {
+    function start(shellOnly = false) {
       clearTimeout(reconnectTimer)
       if (disposed) return
       stopped = false
       startedAt = Date.now()
-      t.write(`\x1b[2miniciando ${label}…\x1b[0m\r\n`)
-      spawnArgs()
+      phase = 'starting'
+      showStarting = false
+      setTimeout(() => (showStarting = phase === 'starting'), STARTING_DELAY_MS)
+      spawnArgs(shellOnly)
         .then(({ program, args, resumed: isResume }) => {
           resumed = isResume
           resumeOutput = ''
@@ -210,9 +224,23 @@
         })
         .catch((e) => {
           stopped = true
+          phase = 'failed'
+          failure = String(e)
           setStatus(chat.id, 'error')
-          t.write(`\x1b[31mfalha ao abrir: ${e}\x1b[0m\r\n\x1b[2m[ajuste o perfil em Configurações e tecle Enter]\x1b[0m\r\n`)
+          // Erro do chat à vista fica no painel; de outro chat, vira aviso.
+          if (!visible) {
+            toast({
+              tone: 'danger',
+              title: `Agente não iniciou em ${chat.name}`,
+              text: failure,
+              actions: [{ label: 'Ver erro', run: () => openChat(chat.id) }],
+            })
+          }
         })
+    }
+    restart = (shellOnly = false) => {
+      t.reset()
+      start(shellOnly)
     }
     start()
 
@@ -315,6 +343,29 @@
 
 <div class="term" bind:this={el}></div>
 
+{#if phase === 'failed'}
+  <div class="overlay">
+    <EmptyState kind="error" title="Não foi possível abrir o agente" detail={failure}>
+      O comando <code>{label}</code> não abriu nesta pasta. Instale a CLI ou informe o caminho completo no perfil.
+      {#snippet actions()}
+        <button
+          class="btn primary sm"
+          onclick={() => {
+            app.settingsSection = 'agentes'
+            app.modal = 'settings'
+          }}>Informar caminho</button
+        >
+        <button class="btn sm" onclick={() => restart()}>Tentar de novo</button>
+        <button class="btn ghost sm" onclick={() => restart(true)}>Abrir só o shell</button>
+      {/snippet}
+    </EmptyState>
+  </div>
+{:else if phase === 'starting' && showStarting}
+  <div class="overlay">
+    <EmptyState kind="loading" title="Iniciando o agente…">Abrindo <code>{label}</code> em {chatDir(chat) ?? 'pasta do projeto'}.</EmptyState>
+  </div>
+{/if}
+
 {#if app.searching === chat.id}
   <div class="search" role="search">
     <input
@@ -334,6 +385,14 @@
   .term {
     position: absolute;
     inset: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--bg-000);
+    z-index: 4;
   }
   .search {
     position: absolute;

@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
 import { DEFAULT_PERMISSIONS, type Permissions } from './permissions'
+import { toast } from './toasts.svelte'
+import type { Queue } from './queue'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
 export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage'
@@ -87,10 +89,10 @@ export interface Tab {
 
 /** Estado nunca só por cor: cada um tem glifo e palavra (regra do design). */
 export const STATUS: Record<Status, { label: string; glyph: string; color: string; tone: string }> = {
-  running: { label: 'agente trabalhando', glyph: '…', color: 'var(--accent)', tone: 'accent' },
+  running: { label: 'trabalhando', glyph: '›', color: 'var(--accent)', tone: 'accent' },
   waiting: { label: 'aguardando você', glyph: '!', color: 'var(--warning)', tone: 'warning' },
-  idle: { label: 'pronto', glyph: '›', color: 'var(--ink-muted)', tone: '' },
-  done: { label: 'finalizado', glyph: '✓', color: 'var(--success)', tone: 'success' },
+  idle: { label: 'pronto', glyph: '·', color: 'var(--ink-muted)', tone: '' },
+  done: { label: 'concluído', glyph: '✓', color: 'var(--success)', tone: 'success' },
   error: { label: 'erro', glyph: '✗', color: 'var(--danger)', tone: 'danger' },
 }
 
@@ -137,13 +139,17 @@ export const app = $state({
   groups: [] as Group[],
   chats: [] as Chat[],
   tabs: [] as Tab[],
+  /** Projetos e grupos recolhidos na barra lateral. */
+  collapsed: {} as Record<string, boolean>,
   activeTab: null as string | null,
   /** Chat com foco (recebe snippets, busca, fila). */
   active: null as string | null,
   status: {} as Record<string, Status>,
   /** Prompts esperando o agente ficar pronto, por chat. */
-  queue: {} as Record<string, string[]>,
+  queue: {} as Record<string, Queue>,
   modal: null as Modal | null,
+  /** Seção em que as Configurações abrem (ex.: agentes, a partir de um erro). */
+  settingsSection: null as string | null,
   paletteQuery: '',
   paletteOpens: 0,
   /** Chat com a barra de busca aberta. */
@@ -156,13 +162,12 @@ export const app = $state({
   showPanel: true,
   /** Primeiro prompt de um chat novo (tela de boas-vindas): enviado quando o agente termina de abrir. */
   pendingPrompt: {} as Record<string, string>,
-  error: '',
 })
 
 const uid = () => crypto.randomUUID()
 
 export function fail(context: string, e: unknown) {
-  app.error = `${context}: ${e instanceof Error ? e.message : e}`
+  toast({ tone: 'danger', title: context, text: e instanceof Error ? e.message : String(e) })
 }
 
 export const chatById = (id: string) => app.chats.find((c) => c.id === id)
@@ -216,6 +221,7 @@ export interface SavedState {
   tabs: Tab[]
   activeTab: string | null
   active: string | null
+  collapsed: Record<string, boolean>
 }
 
 export const savedState = (): SavedState => ({
@@ -225,9 +231,11 @@ export const savedState = (): SavedState => ({
   tabs: app.tabs,
   activeTab: app.activeTab,
   active: app.active,
+  collapsed: app.collapsed,
 })
 
 function restoreTabs(state: Partial<SavedState>) {
+  app.collapsed = state.collapsed ?? {}
   const known = new Set(app.chats.map((c) => c.id))
   app.tabs = (state.tabs ?? [])
     .map((t) => ({ ...t, panes: t.panes.filter((id) => known.has(id)) }))
@@ -266,6 +274,18 @@ export async function removeProject(id: string) {
 
 export function addGroup(projectId: string, name: string) {
   if (name.trim()) app.groups.push({ id: uid(), name: name.trim(), projectId })
+}
+
+export function renameGroup(id: string, name: string) {
+  if (name.trim()) app.groups = app.groups.map((g) => (g.id === id ? { ...g, name: name.trim() } : g))
+}
+
+/** Ordem de urgência para resumir vários chats num ponto só (grupo recolhido, ícone da bandeja). */
+const URGENCY: Status[] = ['waiting', 'error', 'running', 'done', 'idle']
+
+export function mostUrgent(ids: string[]): Status | undefined {
+  const statuses = ids.map((id) => app.status[id]).filter((s): s is Status => s !== undefined)
+  return URGENCY.find((s) => statuses.includes(s))
 }
 
 /** Os chats do grupo voltam para a raiz do projeto. */
@@ -323,6 +343,13 @@ export async function removeChat(id: string) {
 
 export const chatDir = (chat: Chat) => chat.cwd ?? projectOf(chat)?.path
 
+/** "projeto / grupo" (cabeçalho de painel, uso por chat, título da janela). */
+export function whereOf(chat: Chat): string {
+  const project = app.projects.find((p) => p.id === chat.projectId)?.name ?? ''
+  const group = app.groups.find((g) => g.id === chat.groupId)?.name
+  return group ? `${project} / ${group}` : project
+}
+
 export function updateChat(id: string, patch: Partial<Chat>) {
   app.chats = app.chats.map((c) => (c.id === id ? { ...c, ...patch } : c))
 }
@@ -339,6 +366,8 @@ export async function restartChat(id: string, fresh: boolean) {
 
 export const tabOf = (id: string) => app.tabs.find((t) => t.panes.includes(id))
 export const isOpen = (id: string) => tabOf(id) !== undefined
+/** Chat na aba em foco (o resto está "fora da vista" e recebe avisos em toast). */
+export const isVisible = (id: string) => tabOf(id)?.id === app.activeTab
 export const openIds = () => app.tabs.flatMap((t) => t.panes)
 
 export function focusChat(id: string) {

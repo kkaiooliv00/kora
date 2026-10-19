@@ -6,7 +6,7 @@
   import X from '@lucide/svelte/icons/x'
   import Columns2 from '@lucide/svelte/icons/columns-2'
   import Rows2 from '@lucide/svelte/icons/rows-2'
-  import PopOut from '@lucide/svelte/icons/square-arrow-out-up-right'
+  import Maximize from '@lucide/svelte/icons/maximize-2'
   import PanelRight from '@lucide/svelte/icons/panel-right'
   import glyph from './assets/kora-glyph.svg'
   import Sidebar from './Sidebar.svelte'
@@ -19,6 +19,8 @@
   import Diff from './Diff.svelte'
   import Usage from './Usage.svelte'
   import Kbd from './Kbd.svelte'
+  import ToastStack from './ToastStack.svelte'
+  import Menu from './Menu.svelte'
   import AgentPanel from './AgentPanel.svelte'
   import ApprovalCard from './ApprovalCard.svelte'
   import {
@@ -29,6 +31,7 @@
     fail,
     chatById,
     chatDir,
+    whereOf,
     focusChat,
     closePane,
     closeTab,
@@ -85,11 +88,17 @@
     saveTimer = setTimeout(() => save(config, state), SAVE_DELAY_MS)
   })
 
-  const waiting = $derived(Object.values(app.status).filter((s) => s === 'waiting').length)
+  const waitingNames = $derived(
+    Object.entries(app.status)
+      .filter(([, s]) => s === 'waiting')
+      .map(([id]) => chatById(id)?.name ?? 'chat'),
+  )
+  const waiting = $derived(waitingNames.length)
 
-  // Contador de "aguardando você" no título e na bandeja; pisca a barra de tarefas quando sobe.
+  // Ponto na bandeja, "(N) kora — projeto / grupo" no título; pisca a barra de tarefas quando sobe.
   $effect(() => {
-    invoke('set_waiting', { count: waiting, attention: waiting > lastWaiting }).catch((e) => fail('Bandeja', e))
+    const context = activeChat ? whereOf(activeChat) : null
+    invoke('set_waiting', { waiting: waitingNames, context, attention: waiting > lastWaiting }).catch((e) => fail('Bandeja', e))
     lastWaiting = waiting
   })
 
@@ -157,7 +166,7 @@
               {#if i > 0}<span class="sep" aria-hidden="true">│</span>{/if}
               {@render dot(id)}
               <span class="name">{chatById(id)?.name}</span>
-              {#if app.queue[id]?.length}<span class="badge accent" title="Prompts na fila">{app.queue[id].length} na fila</span>{/if}
+              {#if app.queue[id]?.pending.length}<span class="badge accent" title="Prompts na fila">{app.queue[id].pending.length} na fila</span>{/if}
             {/each}
           </button>
           {#if tab.panes.length > 1 && active}
@@ -175,6 +184,7 @@
       </button>
     </nav>
     <div class="top-right">
+      {#if app.agentsPaused}<span class="badge warning">‖ pausado</span>{/if}
       {#if waiting > 0}<span class="badge warning">! {waiting} aguardando você</span>{/if}
       {#if branch}<span class="badge">{branch}</span>{/if}
       {#if activeStatus === 'running'}<span class="badge accent">› agente ativo</span>{/if}
@@ -194,6 +204,20 @@
     </div>
   </header>
 
+  {#if app.agentsPaused}
+    <div class="paused-banner" role="alert">
+      <span class="paused-glyph" aria-hidden="true">‖</span>
+      <div>
+        <strong>Agentes pausados pelo anti-loop</strong>
+        <p>
+          {AGENT_MESSAGE_LIMIT} mensagens entre chats sem você interagir. Nada foi perdido: os agentes seguem abertos, só o
+          <code>kora-cli send</code> fica recusado até você retomar.
+        </p>
+      </div>
+      <button class="btn primary sm" onclick={resumeAgents}>Retomar</button>
+    </div>
+  {/if}
+
   <div class="body" class:with-panel={showPanel}>
     <Sidebar />
 
@@ -210,12 +234,19 @@
           aria-label={chat.name}
         >
           {#if split}
+            {@const status = STATUS[app.status[chat.id] ?? 'idle']}
             <header>
               {@render dot(chat.id)}
               <span class="name">{chat.name}</span>
-              <span class="pane-status">{STATUS[app.status[chat.id] ?? 'idle'].glyph} {STATUS[app.status[chat.id] ?? 'idle'].label}</span>
-              <button class="icon-btn" title="Separar em aba própria" aria-label="Separar em aba própria" onclick={() => popOut(chat.id)}>
-                <PopOut size={13} strokeWidth={1.5} />
+              <span class="where">{whereOf(chat)}</span>
+              {#if app.status[chat.id] && app.status[chat.id] !== 'idle'}
+                <span class="badge {status.tone}">{status.glyph} {status.label}</span>
+              {/if}
+              <button class="icon-btn" title="Dividir com outro chat" aria-label="Dividir com outro chat" onclick={() => { focusChat(chat.id); openPalette('Dividir com ') }}>
+                <Columns2 size={14} strokeWidth={1.5} />
+              </button>
+              <button class="icon-btn" title="Maximizar em aba própria" aria-label="Maximizar em aba própria" onclick={() => popOut(chat.id)}>
+                <Maximize size={14} strokeWidth={1.5} />
               </button>
               <button class="icon-btn" title="Fechar (encerra o processo)" aria-label="Fechar" onclick={() => closePane(chat.id)}>
                 <X size={14} strokeWidth={1.5} />
@@ -251,30 +282,14 @@
   {#if app.modal === 'diff'}<Diff />{/if}
   {#if app.modal === 'usage'}<Usage />{/if}
 
-  {#if app.agentsPaused}
-    <div class="notice" role="alert">
-      <span class="notice-glyph">!</span>
-      <div>
-        <strong>Agentes pausados</strong>
-        <p>{AGENT_MESSAGE_LIMIT} mensagens entre eles sem você interagir. O <code>kora-cli send</code> fica recusado até você liberar.</p>
-      </div>
-      <button class="btn primary sm" onclick={resumeAgents}>Liberar</button>
-    </div>
-  {/if}
-
-  {#if app.error}
-    <div class="toast" role="alert">
-      <span class="toast-glyph">✗</span>
-      <span>{app.error}</span>
-      <button class="icon-btn" title="Fechar" aria-label="Fechar aviso" onclick={() => (app.error = '')}><X size={14} strokeWidth={1.5} /></button>
-    </div>
-  {/if}
+  <ToastStack />
+  <Menu />
 </div>
 
 <style>
   .app {
     display: grid;
-    grid-template-rows: 44px 1fr 28px;
+    grid-template-rows: 44px auto 1fr 28px;
     height: 100vh;
     background: var(--bg-100);
     color: var(--ink);
@@ -372,6 +387,7 @@
 
   /* ---- corpo ---- */
   .body {
+    grid-row: 3;
     display: grid;
     grid-template-columns: 232px 1fr;
     min-height: 0;
@@ -408,21 +424,24 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    height: 32px;
-    padding: 0 var(--space-1) 0 var(--space-3);
+    height: 36px;
+    padding: 0 var(--space-2) 0 var(--space-3);
     border-bottom: 1px solid var(--line);
-    background: var(--bg-200);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--ink-muted);
-  }
-  .pane.focused header {
-    color: var(--ink);
+    background: var(--bg-100);
   }
   .pane header .name {
-    flex: 1;
+    flex: none;
+    max-width: 40%;
+    font: 600 13px var(--font-mono);
+    color: var(--ink);
   }
-  .pane-status {
+  .where {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
     color: var(--ink-muted);
   }
   .pane-body {
@@ -433,6 +452,7 @@
 
   /* ---- barra de status ---- */
   .statusbar {
+    grid-row: 4;
     display: flex;
     align-items: center;
     gap: var(--space-4);
@@ -449,57 +469,34 @@
   }
 
   /* ---- avisos flutuantes ---- */
-  .notice {
-    position: fixed;
-    left: 50%;
-    top: 56px;
-    transform: translateX(-50%);
+  /* Linhas fixas: a faixa de pausado (linha 2) pode não existir. */
+  .topbar {
+    grid-row: 1;
+  }
+  .paused-banner {
+    grid-row: 2;
     display: flex;
     gap: var(--space-3);
     align-items: center;
-    width: min(620px, calc(100vw - 32px));
-    box-sizing: border-box;
     padding: var(--space-3) var(--space-4);
-    border: 1px solid var(--warning);
-    border-radius: var(--radius-lg);
+    border-bottom: 1px solid var(--line);
     background: var(--warning-soft);
-    box-shadow: var(--shadow-pop);
-    z-index: 20;
   }
-  .notice div {
+  .paused-banner div {
     flex: 1;
   }
-  .notice strong {
-    font-size: 15px;
-    line-height: 22px;
-  }
-  .notice p {
-    margin: 0;
+  .paused-banner strong {
     font-size: 13px;
+    line-height: 20px;
+  }
+  .paused-banner p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 18px;
     color: var(--ink-muted);
   }
-  .notice-glyph {
-    font: 600 15px var(--font-mono);
+  .paused-glyph {
+    font: 600 16px var(--font-mono);
     color: var(--warning);
-  }
-  .toast {
-    position: fixed;
-    right: var(--space-4);
-    bottom: 40px;
-    display: flex;
-    gap: var(--space-3);
-    align-items: flex-start;
-    max-width: 480px;
-    padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
-    border: 1px solid var(--danger);
-    border-radius: var(--radius-lg);
-    background: var(--bg-200);
-    box-shadow: var(--shadow-pop);
-    font-size: 13px;
-    z-index: 20;
-  }
-  .toast-glyph {
-    font: 600 13px var(--font-mono);
-    color: var(--danger);
   }
 </style>

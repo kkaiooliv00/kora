@@ -133,3 +133,11 @@ Pacote `kora-design-handoff.zip` (tokens, fontes, logos, componentes, 5 telas). 
 - Telas: 03 paleta (grupos, destaque), 04 boas-vindas (estado vazio), 05 configurações com navegação
   lateral, abas/barra lateral/barra de status, diff no estilo do bloco da tela 02, status com glifo.
 - Ícones de linha: Lucide.
+
+## Fase 7 ✅ — telas complementares do design (handoff atualizado)
+
+Telas 06–13: cabeçalho de painel e barra lateral projeto → grupo → chat (recolher, contagem, `!`),
+aviso anti-loop, painel de uso (KPIs, linha hoje × ontem, top chats, tabela por chat), broadcast agrupado
+com fila para ocupados, fila de prompts (enviado / em execução / próximo, reordenar, pausar, confirmar),
+estados vazio/carregando/erro (EmptyState, Skeleton), toasts, menu de contexto e ícone da bandeja com
+ponto âmbar (PNG desenhado por escala, sem redimensionar).

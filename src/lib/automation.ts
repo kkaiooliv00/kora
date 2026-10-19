@@ -1,40 +1,32 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
-import { app, chatById, chatDir, fail, isOpen, projectOf, updateChat, type HookDetail, type Snippet, type Status } from './state.svelte'
+import {
+  app,
+  chatById,
+  chatDir,
+  fail,
+  isOpen,
+  isVisible,
+  openChat,
+  projectOf,
+  updateChat,
+  type HookDetail,
+  type Snippet,
+  type Status,
+} from './state.svelte'
 import { terminals } from './terminals'
 import { splitCommand } from './command'
+import { onQueueStatus } from './queue'
+import { toast } from './toasts.svelte'
 
 export function setStatus(id: string, status: Status) {
   const previous = app.status[id]
   if (previous === status) return
   app.status[id] = status
-  // O agente terminou o que estava fazendo: hora do próximo prompt da fila.
-  if (status === 'idle' && previous === 'running') sendNextQueued(id)
+  onQueueStatus(id, previous, status)
 }
 
-function sendNextQueued(id: string) {
-  const [next, ...rest] = app.queue[id] ?? []
-  const terminal = terminals.get(id)
-  if (next === undefined || !terminal) return
-  app.queue[id] = rest
-  terminal.submit(next)
-}
-
-/** Enfileira; se o agente já está parado, envia na hora. */
-export function enqueue(id: string, text: string) {
-  if (!text.trim()) return
-  app.queue[id] = [...(app.queue[id] ?? []), text]
-  if (app.status[id] === 'idle') sendNextQueued(id)
-}
-
-export function dequeue(id: string, index: number) {
-  app.queue[id] = (app.queue[id] ?? []).filter((_, i) => i !== index)
-}
-
-export function broadcast(text: string, ids: string[]) {
-  if (!text.trim()) return
-  ids.forEach((id) => terminals.get(id)?.submit(text))
-}
+export { broadcast, enqueue, dequeue } from './queue'
 
 /** Snippets globais + os do projeto do chat em foco. */
 export function activeSnippets(): Snippet[] {
@@ -78,10 +70,20 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   const chat = chatById(id)
   if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
   updateAgentInfo(id, status, detail)
-  const unseen = !document.hasFocus() || app.active !== id
-  if (!chat || !unseen) return
-  if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')
-  else if (status === 'idle' && previous === 'running') notify(chat.name, 'Terminou')
+  if (!chat) return
+  const finished = status === 'idle' && previous === 'running'
+  // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
+  if (!document.hasFocus()) {
+    if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')
+    else if (finished) notify(chat.name, 'Terminou')
+  } else if (!isVisible(id) && status === 'waiting') {
+    toast({
+      tone: 'warning',
+      title: `${chat.name} aguarda você`,
+      text: detail?.message ?? 'O agente parou esperando uma resposta sua.',
+      actions: [{ label: 'Ir para o chat', primary: true, run: () => openChat(id) }],
+    })
+  }
 }
 
 const PERMISSION_MESSAGE = /permission/i

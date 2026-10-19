@@ -73,6 +73,15 @@ pub fn git_worktree_remove(path: String) -> Result<(), String> {
     git(&path, &["worktree", "remove", &path]).map(|_| ())
 }
 
+/// `git init` na pasta (botão do estado de erro do diff).
+#[tauri::command]
+pub async fn git_init(dir: String) -> Result<(), String> {
+    if !Path::new(&dir).is_dir() {
+        return Err(format!("pasta não encontrada: {dir}"));
+    }
+    git(&dir, &["init"]).map(|_| ())
+}
+
 /// Branch atual da pasta, ou `None` se não for repositório git. (async: fora do thread da janela)
 #[tauri::command]
 pub async fn git_branch(dir: String) -> Option<String> {

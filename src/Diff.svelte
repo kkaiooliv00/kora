@@ -2,6 +2,8 @@
   import { invoke } from '@tauri-apps/api/core'
   import { app, chatById, chatDir } from './lib/state.svelte'
   import { parseDiff, type DiffFile } from './lib/diff'
+  import EmptyState from './EmptyState.svelte'
+  import Skeleton from './Skeleton.svelte'
 
   // Acima disso, cada arquivo mostra só o começo (diff gigante trava a janela).
   const MAX_LINES_PER_FILE = 800
@@ -14,6 +16,17 @@
   let error = $state('')
 
   const untracked = $derived(status.filter((l) => l.startsWith('??')).map((l) => l.slice(3)))
+  const notRepo = $derived(/not a git repository/i.test(error))
+
+  async function gitInit() {
+    if (!dir) return
+    try {
+      await invoke('git_init', { dir })
+      await refresh()
+    } catch (e) {
+      error = String(e)
+    }
+  }
   const branchLine = $derived(status.find((l) => l.startsWith('##'))?.slice(3) ?? '')
 
   async function refresh() {
@@ -49,9 +62,30 @@
 
     <div class="body">
       {#if error}
-        <p class="error" role="alert">✗ {error}</p>
-      {:else if !loading && files.length === 0 && untracked.length === 0}
-        <p class="sub">✓ Nenhuma mudança em relação ao último commit.</p>
+        <EmptyState
+          kind="error"
+          title="Não foi possível gerar o diff"
+          detail={error}
+        >
+          {notRepo ? 'Esta pasta não é um repositório git. Inicie um para acompanhar as alterações do agente.' : 'O git não respondeu nesta pasta.'}
+          {#snippet actions()}
+            {#if notRepo}
+              <button class="btn sm" onclick={gitInit}>Rodar git init</button>
+              <button class="btn ghost sm" onclick={() => (app.modal = null)}>Ignorar</button>
+            {:else}
+              <button class="btn sm" onclick={refresh}>Tentar de novo</button>
+            {/if}
+          {/snippet}
+        </EmptyState>
+      {:else if loading && files.length === 0}
+        <section class="block">
+          <div class="head"><span class="path">calculando…</span></div>
+          <div class="skeleton"><Skeleton lines={5} widths={['40%', '75%', '62%', '80%', '30%']} /></div>
+        </section>
+      {:else if files.length === 0 && untracked.length === 0}
+        <EmptyState kind="empty" title="Nenhuma alteração">
+          O agente ainda não mudou arquivos nesta pasta. Edições aparecem aqui antes de qualquer commit.
+        </EmptyState>
       {/if}
 
       {#each files as file (file.path)}
@@ -190,6 +224,9 @@
     padding: var(--space-2) var(--space-4);
     color: var(--ink-muted);
     font-size: 12px;
+  }
+  .skeleton {
+    padding: var(--space-4);
   }
   .untracked {
     margin: var(--space-2) 0 0;

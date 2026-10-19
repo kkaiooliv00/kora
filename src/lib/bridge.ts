@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { app, chatById, isOpen, projectOf, type Chat } from './state.svelte'
+import { app, chatById, fail, isOpen, projectOf, type Chat } from './state.svelte'
 import { terminals } from './terminals'
 import { AGENT_MESSAGE_LIMIT, admitAgentMessage } from './automation'
 
@@ -107,6 +107,6 @@ export function handleCli(request: CliRequest) {
     reply = { ok: false, text: e instanceof Error ? e.message : String(e) }
   }
   invoke('cli_reply', { id: request.id, ...reply }).catch((e) => {
-    app.error = `kora-cli: ${e}`
+    fail('kora-cli sem resposta', e)
   })
 }

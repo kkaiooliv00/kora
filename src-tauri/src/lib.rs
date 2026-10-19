@@ -36,6 +36,7 @@ pub fn run() {
             git::git_worktree_remove,
             git::git_diff,
             git::git_branch,
+            git::git_init,
             tray::set_waiting,
             usage::usage_summary
         ])

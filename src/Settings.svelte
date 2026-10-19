@@ -22,7 +22,9 @@
     { value: 'deny', label: 'Nunca' },
   ]
 
-  let section = $state<Section>('geral')
+  const requested = SECTIONS.find((s) => s.id === app.settingsSection)?.id
+  app.settingsSection = null
+  let section = $state<Section>(requested ?? 'geral')
   let draft = $state({ ...app.settings })
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
