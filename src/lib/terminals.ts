@@ -4,6 +4,8 @@ export interface TerminalHandle {
   paste(text: string): void
   /** Cola e envia (Enter). */
   submit(text: string): void
+  /** Teclas cruas para o processo (ex.: responder o pedido de permissão). */
+  keys(data: string): void
   /** Últimas `lines` linhas da tela, em texto puro. */
   read(lines: number): string
 }

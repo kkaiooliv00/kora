@@ -73,13 +73,26 @@ pub fn git_worktree_remove(path: String) -> Result<(), String> {
     git(&path, &["worktree", "remove", &path]).map(|_| ())
 }
 
-/// `git status` + diff colorido contra o HEAD.
+/// Branch atual da pasta, ou `None` se não for repositório git. (async: fora do thread da janela)
 #[tauri::command]
-pub fn git_diff(dir: String) -> Result<String, String> {
-    let status = git(&dir, &["-c", "color.status=always", "status", "--short", "--branch"])?;
+pub async fn git_branch(dir: String) -> Option<String> {
+    git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty())
+}
+
+#[derive(Serialize)]
+pub struct Changes {
+    status: String,
+    diff: String,
+}
+
+/// `git status --short` + diff (sem cor) contra o HEAD; o frontend desenha os blocos.
+#[tauri::command]
+pub async fn git_diff(dir: String) -> Result<Changes, String> {
+    let status = git(&dir, &["status", "--short", "--branch"])?;
     // Repositório sem commit ainda não tem HEAD.
-    let diff = git(&dir, &["-c", "color.ui=always", "diff", "HEAD"]).or_else(|_| git(&dir, &["-c", "color.ui=always", "diff"]))?;
-    Ok(format!("{status}\n{diff}"))
+    let diff = git(&dir, &["-c", "core.quotepath=off", "diff", "--no-color", "HEAD"])
+        .or_else(|_| git(&dir, &["-c", "core.quotepath=off", "diff", "--no-color"]))?;
+    Ok(Changes { status, diff })
 }
 
 #[cfg(test)]

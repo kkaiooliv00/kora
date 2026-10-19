@@ -175,7 +175,7 @@
     padding: 12px 14px;
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: var(--bg);
+    background: var(--bg-000);
   }
   .card .sub {
     margin: 0;
@@ -193,7 +193,7 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--ink-muted);
   }
   .bar-row {
     display: grid;
@@ -206,7 +206,7 @@
   .bar {
     height: 10px;
     border-radius: 5px;
-    background: var(--hover);
+    background: var(--bg-300);
     overflow: hidden;
   }
   .bar div {
@@ -228,7 +228,7 @@
   th {
     font-size: 11px;
     font-weight: 500;
-    color: var(--muted);
+    color: var(--ink-muted);
   }
   .label {
     text-align: left;

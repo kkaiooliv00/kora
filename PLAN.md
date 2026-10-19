@@ -121,7 +121,7 @@ Cada fase termina com o app rodando no Windows; o build no Linux é validado via
 - WebView2 — ok (155.x)
 - Node 24 — ok
 
-## Fase 6 — identidade visual (design handoff)
+## Fase 6 ✅ — identidade visual (design handoff)
 
 Pacote `kora-design-handoff.zip` (tokens, fontes, logos, componentes, 5 telas). Decisões (2026-10-19):
 

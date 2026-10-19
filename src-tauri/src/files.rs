@@ -53,9 +53,31 @@ pub fn save_json(app: AppHandle, name: String, value: Value) -> Result<(), Strin
     fs::rename(&tmp, &path).map_err(|e| format!("falha ao gravar {}: {e}", path.display()))
 }
 
-/// Gera um settings do Claude Code com hooks que avisam o status deste chat.
+/// Regras `permissions` vindas da tela de permissões: só listas `allow`/`ask`/`deny` de texto curto.
+fn valid_permissions(value: &Value) -> Result<Value, String> {
+    const LISTS: [&str; 3] = ["allow", "ask", "deny"];
+    const MAX_RULES: usize = 200;
+    const MAX_RULE_LEN: usize = 300;
+    let object = value.as_object().ok_or("permissões inválidas")?;
+    let mut clean = serde_json::Map::new();
+    for (key, list) in object {
+        if !LISTS.contains(&key.as_str()) {
+            return Err(format!("lista de permissão desconhecida: {key}"));
+        }
+        let rules = list.as_array().ok_or("permissões inválidas")?;
+        let valid = rules.len() <= MAX_RULES
+            && rules.iter().all(|r| r.as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= MAX_RULE_LEN));
+        if !valid {
+            return Err(format!("regras inválidas em {key}"));
+        }
+        clean.insert(key.clone(), list.clone());
+    }
+    Ok(Value::Object(clean))
+}
+
+/// Gera um settings do Claude Code com hooks que avisam o status deste chat e as permissões escolhidas.
 #[tauri::command]
-pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String) -> Result<String, String> {
+pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String, permissions: Option<Value>) -> Result<String, String> {
     if !is_valid_id(&chat) {
         return Err("id de chat inválido".into());
     }
@@ -73,6 +95,14 @@ pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String) -> Result<
             "Stop": hook("idle"),
         }
     });
+    let settings = match permissions {
+        Some(rules) => {
+            let mut with_rules = settings;
+            with_rules["permissions"] = valid_permissions(&rules)?;
+            with_rules
+        }
+        None => settings,
+    };
 
     let dir = config_dir(&app)?.join("hooks");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -196,7 +226,17 @@ pub fn open_in_editor(program: String, args: Vec<String>, path: String) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::cmd_quote;
+    use super::{cmd_quote, valid_permissions};
+    use serde_json::json;
+
+    #[test]
+    fn valid_permissions_accepts_only_rule_lists() {
+        let ok = json!({ "allow": ["Read", "Bash(npm test:*)"], "deny": ["Bash(rm -rf:*)"] });
+        assert_eq!(valid_permissions(&ok).unwrap(), ok);
+        assert!(valid_permissions(&json!({ "defaultMode": "bypassPermissions" })).is_err());
+        assert!(valid_permissions(&json!({ "allow": [1] })).is_err());
+        assert!(valid_permissions(&json!({ "allow": [""] })).is_err());
+    }
 
     #[test]
     fn cmd_quote_neutralizes_cmd_metacharacters() {

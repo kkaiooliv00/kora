@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
-import { app, chatById, chatDir, fail, isOpen, projectOf, updateChat, type Snippet, type Status } from './state.svelte'
+import { app, chatById, chatDir, fail, isOpen, projectOf, updateChat, type HookDetail, type Snippet, type Status } from './state.svelte'
 import { terminals } from './terminals'
 import { splitCommand } from './command'
 
@@ -71,16 +71,29 @@ export async function notify(title: string, body: string) {
 }
 
 /** Status vindo dos hooks do Claude Code; notifica se o chat não está à vista. */
-export function onHookStatus(id: string, status: Status, session: string | null) {
+export function onHookStatus(id: string, status: Status, session: string | null, detail: HookDetail | null) {
   if (!isOpen(id)) return
   const previous = app.status[id]
   setStatus(id, status)
   const chat = chatById(id)
   if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
+  updateAgentInfo(id, status, detail)
   const unseen = !document.hasFocus() || app.active !== id
   if (!chat || !unseen) return
   if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')
   else if (status === 'idle' && previous === 'running') notify(chat.name, 'Terminou')
+}
+
+const PERMISSION_MESSAGE = /permission/i
+
+/** Plano, contexto e pedido de permissão do painel; a permissão some quando o agente volta a andar. */
+function updateAgentInfo(id: string, status: Status, detail: HookDetail | null) {
+  const info = { ...app.agentInfo[id] }
+  if (detail?.todos) info.todos = detail.todos
+  if (detail?.context) info.context = detail.context
+  if (detail?.event === 'Notification' && detail.message && PERMISSION_MESSAGE.test(detail.message)) info.permission = detail.message
+  else if (status !== 'waiting') info.permission = undefined
+  app.agentInfo[id] = info
 }
 
 /** Mensagens entre agentes sem você digitar nada; acima disso o Kora pausa as entregas. */

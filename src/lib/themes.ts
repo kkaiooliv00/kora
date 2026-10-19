@@ -1,6 +1,33 @@
 import type { ITheme } from '@xterm/xterm'
 
+/** Tema padrão: tokens do design (bg-000, ink, accent, petrol, success/warning/danger). */
+const KORA: ITheme = {
+  background: '#0a0e11',
+  foreground: '#e2eaed',
+  cursor: '#3cc8d4',
+  cursorAccent: '#0a0e11',
+  selectionBackground: '#0e4f5a',
+  black: '#151d22',
+  red: '#ff8a6b',
+  green: '#7fd69b',
+  yellow: '#e8b852',
+  blue: '#6fa8dc',
+  magenta: '#c79bd8',
+  cyan: '#3cc8d4',
+  white: '#93a3ab',
+  brightBlack: '#748690',
+  brightRed: '#ffb29c',
+  brightGreen: '#a6e7b9',
+  brightYellow: '#f2d08a',
+  brightBlue: '#9cc6ec',
+  brightMagenta: '#ddbde8',
+  brightCyan: '#7fe0e8',
+  brightWhite: '#e2eaed',
+}
+
+/** Temas do terminal. A interface segue sempre a marca Kora; só o terminal muda. */
 export const THEMES: Record<string, ITheme> = {
+  Kora: KORA,
   Grafite: {
     background: '#16181d',
     foreground: '#d7dae0',
@@ -51,4 +78,4 @@ export const THEMES: Record<string, ITheme> = {
   },
 }
 
-export const themeOf = (name: string): ITheme => THEMES[name] ?? THEMES.Grafite
+export const themeOf = (name: string): ITheme => THEMES[name] ?? KORA

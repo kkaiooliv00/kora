@@ -11,6 +11,7 @@ export const DEFAULT_KEYS: Record<string, string> = {
   editor: 'Ctrl+Shift+E',
   diff: 'Ctrl+Shift+G',
   usage: 'Ctrl+Shift+U',
+  panel: 'Ctrl+Shift+L',
   settings: 'Ctrl+,',
 }
 

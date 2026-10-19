@@ -15,6 +15,16 @@
     type Chat,
   } from './lib/state.svelte'
   import { openInEditor } from './lib/automation'
+  import Plus from '@lucide/svelte/icons/plus'
+  import X from '@lucide/svelte/icons/x'
+  import FolderPlus from '@lucide/svelte/icons/folder-plus'
+  import ListPlus from '@lucide/svelte/icons/list-plus'
+  import SquarePen from '@lucide/svelte/icons/square-pen'
+  import GitBranch from '@lucide/svelte/icons/git-branch'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import Settings from '@lucide/svelte/icons/settings'
+
+  const ICON = { size: 14, strokeWidth: 1.5 }
 
   type Adding = { kind: 'chat' | 'group'; projectId: string; groupId?: string }
 
@@ -66,12 +76,13 @@
       class="dot"
       class:off={!status}
       style:--dot={status ? STATUS[status].color : 'transparent'}
-      title={status ? STATUS[status].label : 'fechado'}
+      aria-hidden="true"
     ></span>
     {#if renaming === chat.id}
       <input
         class="rename"
         value={chat.name}
+        aria-label="Novo nome do chat"
         use:focus
         onblur={(e) => finishRename(chat, e.currentTarget.value)}
         onkeydown={(e) => {
@@ -86,13 +97,14 @@
         ondragstart={() => (dragged = chat.id)}
         onclick={(e) => (e.altKey ? splitChat(chat.id) : openChat(chat.id))}
         ondblclick={() => (renaming = chat.id)}
-        title="Clique abre · Alt+clique abre ao lado · duplo clique renomeia · arraste para um grupo"
+        title={`${status ? STATUS[status].label : 'fechado'} · clique abre, Alt+clique abre ao lado, duplo clique renomeia, arraste para um grupo`}
       >
-        {chat.name}
-        {#if chat.branch}<span class="branch" title={`${chat.branch} · ${chat.cwd}`}>⎇</span>{/if}
+        <span class="text">{chat.name}</span>
+        {#if chat.branch}<span class="branch" title={`${chat.branch} · ${chat.cwd}`}><GitBranch size={12} strokeWidth={1.5} /></span>{/if}
+        {#if status && status !== 'idle'}<span class="glyph" style:color={STATUS[status].color}>{STATUS[status].glyph}</span>{/if}
       </button>
     {/if}
-    <button class="icon" title="Remover chat" onclick={() => removeChat(chat.id)}>×</button>
+    <button class="icon-btn hover" title="Remover chat" aria-label="Remover chat" onclick={() => removeChat(chat.id)}><X {...ICON} /></button>
   </li>
 {/snippet}
 
@@ -101,7 +113,7 @@
     {#if adding.kind === 'chat'}
       <div class="picker">
         {#each app.profiles as profile (profile.id)}
-          <button onclick={() => pickProfile(profile.id)}>{profile.name}</button>
+          <button class="btn sm" onclick={() => pickProfile(profile.id)}>{profile.name}</button>
         {/each}
         <label class="isolated" title="Cria um git worktree e uma branch kora/... só para este chat">
           <input type="checkbox" bind:checked={isolated} /> worktree isolado
@@ -109,7 +121,14 @@
       </div>
     {:else}
       <form class="picker" onsubmit={submitGroup}>
-        <input placeholder="Nome do grupo" bind:value={groupName} use:focus onkeydown={(e) => e.key === 'Escape' && (adding = null)} />
+        <input
+          class="input"
+          placeholder="Nome do grupo"
+          aria-label="Nome do grupo"
+          bind:value={groupName}
+          use:focus
+          onkeydown={(e) => e.key === 'Escape' && (adding = null)}
+        />
       </form>
     {/if}
   {/if}
@@ -117,8 +136,8 @@
 
 <aside>
   <header>
-    <h1>Projetos</h1>
-    <button class="icon add" title="Novo projeto" onclick={addProject}>+</button>
+    <p class="overline">projetos</p>
+    <button class="icon-btn" title="Abrir pasta como projeto" aria-label="Novo projeto" onclick={addProject}><FolderPlus {...ICON} /></button>
   </header>
 
   <div class="tree">
@@ -126,19 +145,19 @@
       <section ondragover={allowDrop} ondrop={(e) => drop(e, project.id)} aria-label={project.name}>
         <div class="row project">
           <span class="name" title={project.path}>{project.name}</span>
-          <button class="icon" title="Novo chat" onclick={() => toggle({ kind: 'chat', projectId: project.id })}>+</button>
-          <button class="icon" title="Novo grupo" onclick={() => toggle({ kind: 'group', projectId: project.id })}>⊞</button>
-          <button class="icon" title="Abrir no editor" onclick={() => openInEditor(project.path)}>↗</button>
-          <button class="icon" title="Remover projeto" onclick={() => removeProject(project.id)}>×</button>
+          <button class="icon-btn hover" title="Novo chat" aria-label="Novo chat" onclick={() => toggle({ kind: 'chat', projectId: project.id })}><Plus {...ICON} /></button>
+          <button class="icon-btn hover" title="Novo grupo" aria-label="Novo grupo" onclick={() => toggle({ kind: 'group', projectId: project.id })}><ListPlus {...ICON} /></button>
+          <button class="icon-btn hover" title="Abrir no editor" aria-label="Abrir no editor" onclick={() => openInEditor(project.path)}><SquarePen {...ICON} /></button>
+          <button class="icon-btn hover" title="Remover projeto" aria-label="Remover projeto" onclick={() => removeProject(project.id)}><X {...ICON} /></button>
         </div>
         {@render picker(project.id)}
 
         {#each app.groups.filter((g) => g.projectId === project.id) as group (group.id)}
           <div class="group" role="group" aria-label={group.name} ondragover={allowDrop} ondrop={(e) => drop(e, project.id, group.id)}>
             <div class="row">
-              <span class="name">▾ {group.name}</span>
-              <button class="icon" title="Novo chat no grupo" onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: group.id })}>+</button>
-              <button class="icon" title="Remover grupo (os chats ficam)" onclick={() => removeGroup(group.id)}>×</button>
+              <span class="name group-name"><ChevronDown size={12} strokeWidth={1.5} /> {group.name}</span>
+              <button class="icon-btn hover" title="Novo chat no grupo" aria-label="Novo chat no grupo" onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: group.id })}><Plus {...ICON} /></button>
+              <button class="icon-btn hover" title="Remover grupo (os chats ficam)" aria-label="Remover grupo" onclick={() => removeGroup(group.id)}><X {...ICON} /></button>
             </div>
             {@render picker(project.id, group.id)}
             <ul>
@@ -156,12 +175,12 @@
         </ul>
       </section>
     {:else}
-      <p class="hint">Clique em <b>+</b> para escolher a pasta do primeiro projeto.</p>
+      <p class="hint">Nenhum projeto ainda. Abra uma pasta para começar.</p>
     {/each}
   </div>
 
   <footer>
-    <button onclick={() => (app.modal = 'settings')}>⚙ Configurações</button>
+    <button class="btn ghost settings" onclick={() => (app.modal = 'settings')}><Settings {...ICON} /> Configurações</button>
   </footer>
 </aside>
 
@@ -170,31 +189,22 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--panel);
+    background: var(--bg-100);
     border-right: 1px solid var(--line);
-    font-size: 13px;
   }
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 12px 10px 16px;
-  }
-  h1 {
-    margin: 0;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--muted);
+    padding: var(--space-4) var(--space-3) var(--space-2) var(--space-4);
   }
   .tree {
     flex: 1;
     overflow-y: auto;
-    padding: 0 8px 12px;
+    padding: 0 var(--space-3) var(--space-3);
   }
   section {
-    padding: 4px 0 8px;
+    padding: var(--space-2) 0;
   }
   section + section {
     border-top: 1px solid var(--line);
@@ -204,139 +214,140 @@
     align-items: center;
     gap: 2px;
     min-height: 28px;
-    padding-left: 8px;
+    padding-left: var(--space-2);
+    border-radius: var(--radius-md);
   }
   .project .name {
+    font-size: 13px;
+    line-height: 18px;
     font-weight: 600;
   }
   .name {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .group {
-    margin-left: 10px;
+    margin-left: var(--space-2);
   }
-  .group .name {
-    color: var(--muted);
+  .group-name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
   }
   ul {
     list-style: none;
     margin: 0;
-    padding: 0 0 0 8px;
+    padding: 0;
   }
   .chat {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding-left: 8px;
-    border-radius: 6px;
+    gap: var(--space-2);
+    height: 32px;
+    padding-left: var(--space-2);
+    border-radius: var(--radius-md);
+    transition: background-color 120ms ease-out;
   }
   .chat:hover,
   .row:hover {
-    background: var(--hover);
-    border-radius: 6px;
+    background: var(--bg-200);
   }
   .chat.active {
-    background: var(--selected);
+    background: var(--bg-300);
   }
   .dot {
     flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
     background: var(--dot);
   }
   .dot.off {
-    box-shadow: inset 0 0 0 1.5px var(--muted);
+    box-shadow: inset 0 0 0 1px var(--line-control);
   }
   .label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     flex: 1;
     min-width: 0;
-    padding: 5px 0;
+    height: 100%;
+    font-family: var(--font-mono);
+    font-size: 13px;
     text-align: left;
+    color: var(--ink);
+  }
+  .text {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .icon {
-    flex: none;
-    width: 24px;
-    height: 24px;
-    border-radius: 5px;
-    color: var(--muted);
+  .branch {
+    display: inline-flex;
+    color: var(--accent);
+  }
+  .glyph {
+    margin-left: auto;
+    padding-right: var(--space-1);
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .icon-btn.hover {
     opacity: 0;
   }
-  .row:hover .icon,
-  .chat:hover .icon,
-  .icon:focus-visible,
-  .add {
+  .row:hover .icon-btn.hover,
+  .chat:hover .icon-btn.hover,
+  .icon-btn.hover:focus-visible {
     opacity: 1;
-  }
-  .icon:hover {
-    color: var(--fg);
-    background: var(--hover);
-  }
-  .add {
-    font-size: 18px;
   }
   .picker {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin: 4px 0 6px 16px;
+    gap: var(--space-1);
+    margin: var(--space-1) 0 var(--space-2) var(--space-2);
   }
-  .picker button {
-    padding: 3px 9px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-  }
-  .picker button:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  input {
+  .picker .input {
     flex: 1;
-    min-width: 0;
-    padding: 4px 6px;
-    border: 1px solid var(--accent);
-    border-radius: 5px;
-    background: var(--bg);
-    color: var(--fg);
-    font: inherit;
   }
   .isolated {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-1);
     width: 100%;
     margin-top: 2px;
-    font-size: 11px;
-    color: var(--muted);
+    font-size: 12px;
+    color: var(--ink-muted);
   }
-  .branch {
-    margin-left: 4px;
-    color: var(--accent);
+  .rename {
+    flex: 1;
+    min-width: 0;
+    height: 24px;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--bg-000);
+    color: var(--ink);
+    font: 13px var(--font-mono);
+    outline: none;
   }
   .hint {
-    padding: 8px;
-    color: var(--muted);
-    line-height: 1.5;
+    padding: var(--space-2);
+    font-size: 13px;
+    color: var(--ink-muted);
   }
   footer {
-    padding: 8px;
+    padding: var(--space-2) var(--space-3);
     border-top: 1px solid var(--line);
   }
-  footer button {
+  .settings {
     width: 100%;
-    padding: 7px 8px;
-    border-radius: 6px;
-    text-align: left;
-    color: var(--muted);
-  }
-  footer button:hover {
-    background: var(--hover);
-    color: var(--fg);
   }
 </style>

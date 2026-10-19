@@ -42,7 +42,7 @@
         </fieldset>
       {/if}
 
-      <label>
+      <label class="field">
         Prompt
         <!-- svelte-ignore a11y_autofocus -->
         <textarea bind:value={text} rows="6" autofocus onkeydown={onKey}></textarea>
@@ -67,24 +67,24 @@
     margin: 0 0 14px;
     padding: 10px 12px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
   }
   legend {
     padding: 0 4px;
     font-size: 12px;
-    color: var(--muted);
+    color: var(--ink-muted);
   }
   .check {
     flex-direction: row !important;
     align-items: center;
     gap: 8px !important;
-    color: var(--fg) !important;
+    color: var(--ink) !important;
     font-size: 13px !important;
   }
   .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
     background: var(--dot);
   }
 </style>

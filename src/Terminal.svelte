@@ -11,6 +11,7 @@
   import { noteHumanInput, setStatus } from './lib/automation'
   import { terminals } from './lib/terminals'
   import { splitCommand } from './lib/command'
+  import { claudePermissions } from './lib/permissions'
   import { themeOf } from './lib/themes'
 
   // Sem saída por esse tempo = agente parado (para CLIs sem hooks).
@@ -21,6 +22,9 @@
   // (login expirado, rede fora ou Ctrl+C também saem com erro e não devem perder a conversa).
   const RESUME_GONE = /No conversation found/i
   const RESUME_WATCH_BYTES = 8192
+  const PROMPT_READY_QUIET_MS = 1500
+  // Linha 13/20 do token `term` do design.
+  const LINE_HEIGHT = 20 / 13
   // Perfis com "reconnect": espera 2, 4, 8… s (até 30) entre tentativas; desiste depois de 6 seguidas.
   const RECONNECT_MAX_TRIES = 6
   const RECONNECT_MAX_DELAY_S = 30
@@ -56,7 +60,8 @@
     if (isClaude) {
       if (chat.sessionId) args.push('--resume', chat.sessionId)
       args.push('--append-system-prompt', KORA_PROMPT)
-      args.push('--settings', await invoke<string>('claude_settings', { chat: chat.id }))
+      const permissions = claudePermissions(app.settings.permissions)
+      args.push('--settings', await invoke<string>('claude_settings', { chat: chat.id, permissions }))
     }
     return { program, args, resumed: isClaude && Boolean(chat.sessionId) }
   }
@@ -101,6 +106,8 @@
       fontSize: app.settings.fontSize,
       theme: themeOf(app.settings.theme),
       cursorBlink: true,
+      cursorStyle: 'block',
+      lineHeight: LINE_HEIGHT,
     })
     t.loadAddon(fit)
     t.loadAddon(search)
@@ -134,10 +141,24 @@
     let disposed = false
     const write = (data: string) => id !== undefined && invoke('pty_write', { id, data })
 
+    // Primeiro prompt (boas-vindas): sai quando a saída do agente sossega, sinal de que a TUI abriu.
+    let promptTimer: ReturnType<typeof setTimeout> | undefined
+    const sendPendingPrompt = () => {
+      const text = app.pendingPrompt[chat.id]
+      if (!text) return
+      delete app.pendingPrompt[chat.id]
+      t.paste(text)
+      setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
+    }
+
     const onData = new Channel<ArrayBuffer>()
     onData.onmessage = (buf) => {
       if (disposed) return
       t.write(new Uint8Array(buf))
+      if (app.pendingPrompt[chat.id]) {
+        clearTimeout(promptTimer)
+        promptTimer = setTimeout(sendPendingPrompt, PROMPT_READY_QUIET_MS)
+      }
       if (resumed && resumeOutput.length < RESUME_WATCH_BYTES) resumeOutput += decoder.decode(buf, { stream: true })
       if (!heuristic) return
       setStatus(chat.id, 'running')
@@ -212,6 +233,10 @@
         t.paste(text)
         setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
       },
+      keys: (data) => {
+        write(data)
+        t.focus()
+      },
       read: (lines) => {
         const buffer = t.buffer.active
         const start = Math.max(0, buffer.length - lines)
@@ -231,6 +256,7 @@
     return () => {
       disposed = true
       clearTimeout(reconnectTimer)
+      clearTimeout(promptTimer)
       ro.disconnect()
       el.removeEventListener('paste', onPaste, true)
       el.removeEventListener('focusin', onFocus)
@@ -304,43 +330,46 @@
 <style>
   .term {
     position: absolute;
-    inset: 6px;
+    inset: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   }
   .search {
     position: absolute;
-    top: 8px;
-    right: 18px;
+    top: var(--space-2);
+    right: var(--space-4);
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 4px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--panel);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 0.3);
+    padding: var(--space-1);
+    border-radius: var(--radius-md);
+    background: var(--bg-200);
+    box-shadow: var(--shadow-pop);
     z-index: 5;
   }
   .search input {
-    width: 200px;
-    padding: 5px 8px;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    background: var(--bg);
-    color: var(--fg);
-    font: inherit;
+    width: 220px;
+    height: 28px;
+    box-sizing: border-box;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius-md);
+    background: var(--bg-000);
+    color: var(--ink);
+    font: 12px/18px var(--font-mono);
+    caret-color: var(--accent);
   }
   .search input:focus {
-    outline: none;
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
     border-color: var(--accent);
   }
   .search button {
-    width: 26px;
-    height: 26px;
-    border-radius: 5px;
-    color: var(--muted);
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-md);
+    color: var(--ink-muted);
   }
   .search button:hover {
-    background: var(--hover);
-    color: var(--fg);
+    background: var(--bg-300);
+    color: var(--ink);
   }
 </style>

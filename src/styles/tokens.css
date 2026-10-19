@@ -1,0 +1,55 @@
+/* Kora — tokens do design handoff (fonte da verdade: tokens.json do pacote de design) */
+:root, [data-theme="dark"] {
+  --bg-000: #0a0e11;
+  --bg-100: #0f1519;
+  --bg-200: #151d22;
+  --bg-300: #1c262c;
+  --line: #25313a;
+  --line-control: #5a6d77;
+  --ink: #e2eaed;
+  --ink-muted: #93a3ab;
+  --ink-faint: #748690;
+  --accent: #3cc8d4;
+  --accent-strong: #7fe0e8;
+  --accent-soft: #0d2a30;
+  --on-accent: #061b1f;
+  --petrol: #0e4f5a;
+  --selection: var(--petrol);
+  --focus-ring: var(--accent);
+  --success: #7fd69b;
+  --success-soft: #11261b;
+  --warning: #e8b852;
+  --warning-soft: #2a2110;
+  --danger: #ff8a6b;
+  --danger-soft: #2e1610;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px #25313a;
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.display { font-family: var(--font-mono); font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -0.02em; }
+.title { font-family: var(--font-mono); font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.heading { font-family: var(--font-sans); font-size: 15px; line-height: 22px; font-weight: 600; }
+.body { font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 400; }
+.label { font-family: var(--font-sans); font-size: 13px; line-height: 18px; font-weight: 500; }
+.caption { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 400; }
+.term { font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400; }
+.term-strong { font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 600; }
+.kbd { font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.02em; }
+.overline { font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.08em; }
+@font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../assets/fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans"; src: url("../assets/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans"; src: url("../assets/fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans"; src: url("../assets/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }

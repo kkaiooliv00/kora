@@ -41,7 +41,7 @@
         </ol>
       {/if}
 
-      <label>
+      <label class="field">
         Próximo prompt
         <!-- svelte-ignore a11y_autofocus -->
         <textarea bind:value={text} rows="4" autofocus onkeydown={onKey}></textarea>
@@ -69,9 +69,9 @@
   }
   li button {
     margin-left: 8px;
-    color: var(--muted);
+    color: var(--ink-muted);
   }
   li button:hover {
-    color: #e5484d;
+    color: var(--danger);
   }
 </style>

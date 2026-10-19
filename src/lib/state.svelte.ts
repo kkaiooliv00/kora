@@ -2,6 +2,7 @@ import { tick } from 'svelte'
 import { invoke } from '@tauri-apps/api/core'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
+import { DEFAULT_PERMISSIONS, type Permissions } from './permissions'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
 export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage'
@@ -37,6 +38,8 @@ export interface Chat {
   branch?: string
   /** Sessão do Claude, para retomar a conversa ao reabrir. */
   sessionId?: string
+  /** Última vez aberto (ms), para a lista de recentes. */
+  lastActive?: number
 }
 export interface Snippet {
   name: string
@@ -45,6 +48,8 @@ export interface Snippet {
   project?: string
 }
 export interface Settings {
+  /** Versão do formato; < 2 = antes da identidade visual Kora. */
+  version: number
   fontFamily: string
   fontSize: number
   theme: string
@@ -54,7 +59,25 @@ export interface Settings {
   editor: string
   keys: Record<string, string>
   snippets: Snippet[]
+  /** Regras passadas ao Claude Code de cada chat. */
+  permissions: Permissions
 }
+/** Do hook do Claude: plano (TodoWrite), pedido de permissão em aberto e uso de contexto. */
+export interface AgentInfo {
+  todos?: { content: string; status: string }[]
+  permission?: string
+  context?: { tokens: number; model: string }
+}
+
+/** Resumo de um evento de hook (montado em src-tauri/src/hooks.rs). */
+export interface HookDetail {
+  event: string
+  message?: string
+  tool?: string
+  todos?: { content: string; status: string }[]
+  context?: { tokens: number; model: string }
+}
+
 /** Uma aba com um ou mais chats lado a lado. */
 export interface Tab {
   id: string
@@ -62,12 +85,13 @@ export interface Tab {
   vertical: boolean
 }
 
-export const STATUS: Record<Status, { label: string; color: string }> = {
-  running: { label: 'rodando', color: '#4cc38a' },
-  waiting: { label: 'aguardando você', color: '#f2b84b' },
-  idle: { label: 'pronto', color: '#8a90a0' },
-  done: { label: 'finalizado', color: '#5b8def' },
-  error: { label: 'erro', color: '#e5484d' },
+/** Estado nunca só por cor: cada um tem glifo e palavra (regra do design). */
+export const STATUS: Record<Status, { label: string; glyph: string; color: string; tone: string }> = {
+  running: { label: 'agente trabalhando', glyph: '…', color: 'var(--accent)', tone: 'accent' },
+  waiting: { label: 'aguardando você', glyph: '!', color: 'var(--warning)', tone: 'warning' },
+  idle: { label: 'pronto', glyph: '›', color: 'var(--ink-muted)', tone: '' },
+  done: { label: 'finalizado', glyph: '✓', color: 'var(--success)', tone: 'success' },
+  error: { label: 'erro', glyph: '✗', color: 'var(--danger)', tone: 'danger' },
 }
 
 const AGY_PROFILE: Profile = { id: 'agy', name: 'Agy', command: 'agy' }
@@ -81,13 +105,18 @@ const DEFAULT_PROFILES: Profile[] = [
   { id: 'shell', name: 'Shell', command: '' },
 ]
 
+const LEGACY_FONT = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
+const SETTINGS_VERSION = 2
+
 const DEFAULT_SETTINGS: Settings = {
-  fontFamily: '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
-  fontSize: 14,
-  theme: 'Grafite',
+  version: SETTINGS_VERSION,
+  fontFamily: '"JetBrains Mono", ui-monospace, Consolas, monospace',
+  fontSize: 13,
+  theme: 'Kora',
   browser: '',
   editor: 'code',
   keys: DEFAULT_KEYS,
+  permissions: DEFAULT_PERMISSIONS,
   snippets: [
     { name: 'Revisar mudanças', text: 'Revise as mudanças não commitadas e aponte bugs e riscos.' },
     {
@@ -122,6 +151,11 @@ export const app = $state({
   /** Mensagens entre agentes desde a última vez que você digitou; pausa no limite. */
   agentMessages: 0,
   agentsPaused: false,
+  agentInfo: {} as Record<string, AgentInfo>,
+  /** Painel lateral do agente (plano, permissões, contexto). */
+  showPanel: true,
+  /** Primeiro prompt de um chat novo (tela de boas-vindas): enviado quando o agente termina de abrir. */
+  pendingPrompt: {} as Record<string, string>,
   error: '',
 })
 
@@ -145,11 +179,12 @@ export async function load(): Promise<boolean> {
     // v0.1.0 salvou o perfil "gemini"; o comando certo é o agy.
     const legacyGemini = profiles.some((p) => p.id === 'gemini' && p.command === 'gemini')
     app.profiles = profiles.map((p) => (legacyGemini && p.id === 'gemini' ? AGY_PROFILE : p))
-    app.settings = {
+    app.settings = migrateSettings({
       ...DEFAULT_SETTINGS,
       ...config?.settings,
       keys: { ...DEFAULT_KEYS, ...config?.settings?.keys },
-    }
+      permissions: { ...DEFAULT_PERMISSIONS, ...config?.settings?.permissions },
+    })
     app.projects = state?.projects ?? []
     app.groups = state?.groups ?? []
     app.chats = (state?.chats ?? []).map((c) => (legacyGemini && c.profileId === 'gemini' ? { ...c, profileId: 'agy' } : c))
@@ -158,6 +193,18 @@ export async function load(): Promise<boolean> {
   } catch (e) {
     fail('Configuração não carregada (nada será salvo até corrigir)', e)
     return false
+  }
+}
+
+/** Quem ainda estava nos padrões antigos (Grafite, Cascadia 14) passa para o tema Kora. */
+function migrateSettings(settings: Settings): Settings {
+  if ((settings.version ?? 1) >= SETTINGS_VERSION) return settings
+  return {
+    ...settings,
+    version: SETTINGS_VERSION,
+    theme: settings.theme === 'Grafite' ? DEFAULT_SETTINGS.theme : settings.theme,
+    fontFamily: settings.fontFamily === LEGACY_FONT ? DEFAULT_SETTINGS.fontFamily : settings.fontFamily,
+    fontSize: settings.fontSize === 14 ? DEFAULT_SETTINGS.fontSize : settings.fontSize,
   }
 }
 
@@ -227,8 +274,8 @@ export function removeGroup(id: string) {
   app.groups = app.groups.filter((g) => g.id !== id)
 }
 
-/** `worktree`: o chat ganha um git worktree e uma branch `kora/...` só dele. */
-export async function addChat(projectId: string, profileId: string, groupId?: string, worktree = false) {
+/** `worktree`: o chat ganha um git worktree e uma branch `kora/...` só dele. Devolve o id criado. */
+export async function addChat(projectId: string, profileId: string, groupId?: string, worktree = false): Promise<string | undefined> {
   const profile = app.profiles.find((p) => p.id === profileId)
   const project = app.projects.find((p) => p.id === projectId)
   if (!profile || !project) return
@@ -243,11 +290,13 @@ export async function addChat(projectId: string, profileId: string, groupId?: st
       chat.cwd = created.path
       chat.branch = created.branch
     } catch (e) {
-      return fail('Worktree não criado', e)
+      fail('Worktree não criado', e)
+      return undefined
     }
   }
   app.chats.push(chat)
   openChat(chat.id)
+  return chat.id
 }
 
 export function renameChat(id: string, name: string) {
@@ -301,6 +350,7 @@ export function focusChat(id: string) {
 
 export function openChat(id: string) {
   if (!isOpen(id)) app.tabs.push({ id: uid(), panes: [id], vertical: false })
+  updateChat(id, { lastActive: Date.now() })
   focusChat(id)
 }
 
@@ -330,6 +380,7 @@ export function closePane(id: string) {
   app.tabs = withoutPane(app.tabs, id)
   delete app.status[id]
   delete app.queue[id]
+  delete app.agentInfo[id]
   if (app.searching === id) app.searching = null
   if (app.active !== id) return
   const next = tabOf(tab.panes.find((p) => p !== id) ?? '') ?? app.tabs[Math.min(index, app.tabs.length - 1)]

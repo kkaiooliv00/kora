@@ -2,14 +2,25 @@
   import { onMount } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
+  import Plus from '@lucide/svelte/icons/plus'
+  import X from '@lucide/svelte/icons/x'
+  import Columns2 from '@lucide/svelte/icons/columns-2'
+  import Rows2 from '@lucide/svelte/icons/rows-2'
+  import PopOut from '@lucide/svelte/icons/square-arrow-out-up-right'
+  import PanelRight from '@lucide/svelte/icons/panel-right'
+  import glyph from './assets/kora-glyph.svg'
   import Sidebar from './Sidebar.svelte'
   import Terminal from './Terminal.svelte'
+  import Welcome from './Welcome.svelte'
   import Settings from './Settings.svelte'
   import Palette from './Palette.svelte'
   import Broadcast from './Broadcast.svelte'
   import Queue from './Queue.svelte'
   import Diff from './Diff.svelte'
   import Usage from './Usage.svelte'
+  import Kbd from './Kbd.svelte'
+  import AgentPanel from './AgentPanel.svelte'
+  import ApprovalCard from './ApprovalCard.svelte'
   import {
     app,
     load,
@@ -17,6 +28,7 @@
     savedState,
     fail,
     chatById,
+    chatDir,
     focusChat,
     closePane,
     closeTab,
@@ -24,20 +36,21 @@
     toggleDirection,
     STATUS,
     type Status,
+    type HookDetail,
     type Chat,
     type Tab,
   } from './lib/state.svelte'
   import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents } from './lib/automation'
   import { handleCli, type CliRequest } from './lib/bridge'
-  import { ACTIONS } from './lib/commands'
+  import { ACTIONS, openPalette } from './lib/commands'
   import { comboOf, normalizeCombo } from './lib/keys'
-  import { themeOf } from './lib/themes'
 
   const SAVE_DELAY_MS = 300
 
   let loaded = $state(false)
   let saveTimer: ReturnType<typeof setTimeout> | undefined
   let lastWaiting = 0
+  let branch = $state<string | null>(null)
 
   /** Atalhos globais: rodam antes do terminal receber a tecla. */
   function onKey(e: KeyboardEvent) {
@@ -52,8 +65,8 @@
   onMount(() => {
     load().then((ok) => (loaded = ok))
     const listeners = [
-      listen<{ chat: string; state: Status; session: string | null }>('chat-status', ({ payload }) =>
-        onHookStatus(payload.chat, payload.state, payload.session),
+      listen<{ chat: string; state: Status; session: string | null; detail: HookDetail | null }>('chat-status', ({ payload }) =>
+        onHookStatus(payload.chat, payload.state, payload.session, payload.detail),
       ),
       listen<CliRequest>('kora-cli', ({ payload }) => handleCli(payload)),
     ]
@@ -72,14 +85,40 @@
     saveTimer = setTimeout(() => save(config, state), SAVE_DELAY_MS)
   })
 
+  const waiting = $derived(Object.values(app.status).filter((s) => s === 'waiting').length)
+
   // Contador de "aguardando você" no título e na bandeja; pisca a barra de tarefas quando sobe.
   $effect(() => {
-    const waiting = Object.values(app.status).filter((s) => s === 'waiting').length
     invoke('set_waiting', { count: waiting, attention: waiting > lastWaiting }).catch((e) => fail('Bandeja', e))
     lastWaiting = waiting
   })
 
-  const theme = $derived(themeOf(app.settings.theme))
+  const activeChat = $derived(app.active ? chatById(app.active) : undefined)
+  // Sem chat aberto (boas-vindas) o painel não tem o que mostrar.
+  const showPanel = $derived(app.showPanel && app.tabs.length > 0)
+  const activeDir = $derived(activeChat ? chatDir(activeChat) : undefined)
+  const activeProfile = $derived(activeChat ? app.profiles.find((p) => p.id === activeChat.profileId) : undefined)
+  const activeStatus = $derived(app.active ? app.status[app.active] : undefined)
+
+  $effect(() => {
+    const dir = activeDir
+    if (!dir) {
+      branch = null
+      return
+    }
+    invoke<string | null>('git_branch', { dir })
+      .then((b) => activeDir === dir && (branch = b))
+      .catch(() => (branch = null))
+  })
+
+  /** `C:\Users\fulano\proj` → `~/proj` na barra de status. */
+  function shortPath(path: string | undefined): string {
+    if (!path) return ''
+    const normalized = path.replace(/\\/g, '/')
+    const home = normalized.match(/^([A-Za-z]:)?\/(Users|home)\/[^/]+/)?.[0]
+    return home ? `~${normalized.slice(home.length)}` : normalized
+  }
+
   const panes = $derived(
     app.tabs.flatMap((tab) => tab.panes.map((id, index) => ({ tab, index, chat: chatById(id) }))).filter(
       (p): p is { tab: Tab; index: number; chat: Chat } => p.chat !== undefined,
@@ -93,43 +132,72 @@
       ? `top:${start}%;height:${size}%;left:0;width:100%`
       : `left:${start}%;width:${size}%;top:0;height:100%`
   }
+
+  const comboKeys = (combo: string | undefined) => (combo ? normalizeCombo(combo).split('+') : [])
 </script>
 
 {#snippet dot(id: string)}
   {@const status = app.status[id]}
-  <span class="dot" style:--dot={status ? STATUS[status].color : 'transparent'} title={status ? STATUS[status].label : ''}></span>
+  <span class="dot" style:--dot={status ? STATUS[status].color : 'var(--line-control)'} aria-hidden="true"></span>
 {/snippet}
 
-<div
-  class="app"
-  style:--bg={theme.background}
-  style:--fg={theme.foreground}
-  style:--accent={theme.cursor}
-  style:--mono={app.settings.fontFamily}
->
-  <Sidebar />
-
-  <main>
-    <nav class="tabs" aria-label="Abas">
+<div class="app">
+  <header class="topbar">
+    <img class="glyph" src={glyph} alt="kora" width="18" height="18" />
+    <nav class="tabs" aria-label="Sessões abertas">
       {#each app.tabs as tab (tab.id)}
-        <div class="tab" class:active={app.activeTab === tab.id}>
-          <button class="tab-label" onclick={() => focusChat(tab.panes[0])}>
+        {@const active = app.activeTab === tab.id}
+        <div class="tab" class:active>
+          <button
+            class="tab-label"
+            onclick={() => focusChat(tab.panes[0])}
+            title={tab.panes.map((id) => `${chatById(id)?.name}: ${STATUS[app.status[id] ?? 'idle'].label}`).join('\n')}
+          >
             {#each tab.panes as id, i (id)}
-              {#if i > 0}<span class="sep">│</span>{/if}
+              {#if i > 0}<span class="sep" aria-hidden="true">│</span>{/if}
               {@render dot(id)}
               <span class="name">{chatById(id)?.name}</span>
-              {#if app.queue[id]?.length}<span class="badge" title="Prompts na fila">{app.queue[id].length}</span>{/if}
+              {#if app.queue[id]?.length}<span class="badge accent" title="Prompts na fila">{app.queue[id].length} na fila</span>{/if}
             {/each}
           </button>
-          {#if tab.panes.length > 1 && app.activeTab === tab.id}
-            <button class="tab-btn" title="Alternar lado a lado / empilhado" onclick={toggleDirection}>{tab.vertical ? '⬌' : '⬍'}</button>
+          {#if tab.panes.length > 1 && active}
+            <button class="icon-btn" title="Alternar lado a lado / empilhado" aria-label="Alternar divisão" onclick={toggleDirection}>
+              {#if tab.vertical}<Columns2 size={14} strokeWidth={1.5} />{:else}<Rows2 size={14} strokeWidth={1.5} />{/if}
+            </button>
           {/if}
-          <button class="tab-btn" title="Fechar aba (encerra os processos)" onclick={() => closeTab(tab.id)}>×</button>
+          <button class="icon-btn" title="Fechar (encerra os processos)" aria-label="Fechar aba" onclick={() => closeTab(tab.id)}>
+            <X size={14} strokeWidth={1.5} />
+          </button>
         </div>
       {/each}
+      <button class="icon-btn add" title="Nova sessão" aria-label="Nova sessão" onclick={() => openPalette('Novo ')}>
+        <Plus size={16} strokeWidth={1.5} />
+      </button>
     </nav>
+    <div class="top-right">
+      {#if waiting > 0}<span class="badge warning">! {waiting} aguardando você</span>{/if}
+      {#if branch}<span class="badge">{branch}</span>{/if}
+      {#if activeStatus === 'running'}<span class="badge accent">› agente ativo</span>{/if}
+      <button
+        class="icon-btn"
+        class:on={app.showPanel}
+        title="Painel do agente"
+        aria-label="Mostrar painel do agente"
+        aria-pressed={app.showPanel}
+        onclick={() => (app.showPanel = !app.showPanel)}
+      >
+        <PanelRight size={16} strokeWidth={1.5} />
+      </button>
+      <button class="palette-hint" title="Paleta de comandos" onclick={() => openPalette()}>
+        <Kbd keys={comboKeys(app.settings.keys.palette)} />
+      </button>
+    </div>
+  </header>
 
-    <div class="terms">
+  <div class="body" class:with-panel={showPanel}>
+    <Sidebar />
+
+    <main class="terms">
       {#each panes as { tab, index, chat } (chat.id)}
         {@const visible = tab.id === app.activeTab}
         {@const split = tab.panes.length > 1}
@@ -145,25 +213,36 @@
             <header>
               {@render dot(chat.id)}
               <span class="name">{chat.name}</span>
-              <button title="Separar em aba própria" onclick={() => popOut(chat.id)}>⇱</button>
-              <button title="Fechar (encerra o processo)" onclick={() => closePane(chat.id)}>×</button>
+              <span class="pane-status">{STATUS[app.status[chat.id] ?? 'idle'].glyph} {STATUS[app.status[chat.id] ?? 'idle'].label}</span>
+              <button class="icon-btn" title="Separar em aba própria" aria-label="Separar em aba própria" onclick={() => popOut(chat.id)}>
+                <PopOut size={13} strokeWidth={1.5} />
+              </button>
+              <button class="icon-btn" title="Fechar (encerra o processo)" aria-label="Fechar" onclick={() => closePane(chat.id)}>
+                <X size={14} strokeWidth={1.5} />
+              </button>
             </header>
           {/if}
-          <div class="body">
+          <div class="pane-body">
             <Terminal {chat} {visible} />
+            <ApprovalCard chatId={chat.id} />
           </div>
         </section>
       {:else}
-        <div class="empty">
-          <p>Escolha um chat na barra lateral ou crie um com <b>+</b> ao lado do projeto.</p>
-          <p class="keys">
-            <kbd>{app.settings.keys.palette}</kbd> paleta · <kbd>{app.settings.keys.split}</kbd> dividir ·
-            <b>Alt+clique</b> num chat abre ao lado
-          </p>
-        </div>
+        <Welcome />
       {/each}
-    </div>
-  </main>
+    </main>
+    {#if showPanel}<AgentPanel />{/if}
+  </div>
+
+  <footer class="statusbar">
+    <span>{shortPath(activeDir)}</span>
+    {#if branch}<span>{branch}</span>{/if}
+    <span class="spacer"></span>
+    {#if activeChat && activeStatus}
+      <span style:color={STATUS[activeStatus].color}>{STATUS[activeStatus].glyph} {STATUS[activeStatus].label}</span>
+    {/if}
+    {#if activeProfile}<span>[{activeProfile.name.toLowerCase()}]</span>{/if}
+  </footer>
 
   {#if app.modal === 'settings'}<Settings />{/if}
   {#if app.modal === 'palette'}{#key app.paletteOpens}<Palette />{/key}{/if}
@@ -173,76 +252,97 @@
   {#if app.modal === 'usage'}<Usage />{/if}
 
   {#if app.agentsPaused}
-    <div class="paused" role="alert">
-      <span>
-        Agentes pausados: {AGENT_MESSAGE_LIMIT} mensagens entre eles sem você interagir. As próximas mensagens do
-        <code>kora-cli</code> são recusadas até você liberar.
-      </span>
-      <button class="btn primary" onclick={resumeAgents}>Liberar</button>
+    <div class="notice" role="alert">
+      <span class="notice-glyph">!</span>
+      <div>
+        <strong>Agentes pausados</strong>
+        <p>{AGENT_MESSAGE_LIMIT} mensagens entre eles sem você interagir. O <code>kora-cli send</code> fica recusado até você liberar.</p>
+      </div>
+      <button class="btn primary sm" onclick={resumeAgents}>Liberar</button>
     </div>
   {/if}
 
   {#if app.error}
     <div class="toast" role="alert">
+      <span class="toast-glyph">✗</span>
       <span>{app.error}</span>
-      <button title="Fechar" onclick={() => (app.error = '')}>×</button>
+      <button class="icon-btn" title="Fechar" aria-label="Fechar aviso" onclick={() => (app.error = '')}><X size={14} strokeWidth={1.5} /></button>
     </div>
   {/if}
 </div>
 
 <style>
   .app {
-    --panel: color-mix(in srgb, var(--bg) 92%, var(--fg));
-    --hover: color-mix(in srgb, var(--fg) 8%, transparent);
-    --selected: color-mix(in srgb, var(--accent) 16%, transparent);
-    --line: color-mix(in srgb, var(--fg) 12%, transparent);
-    --muted: color-mix(in srgb, var(--fg) 55%, var(--bg));
     display: grid;
-    grid-template-columns: 250px 1fr;
+    grid-template-rows: 44px 1fr 28px;
     height: 100vh;
-    background: var(--bg);
-    color: var(--fg);
-    font: 13px/1.3 'Segoe UI', system-ui, 'Ubuntu', sans-serif;
+    background: var(--bg-100);
+    color: var(--ink);
   }
-  main {
+
+  /* ---- barra superior ---- */
+  .topbar {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
     min-width: 0;
-    min-height: 0;
+    padding: 0 var(--space-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .glyph {
+    flex: none;
   }
   .tabs {
     display: flex;
+    align-items: center;
     gap: 2px;
-    min-height: 38px;
-    padding: 6px 8px 0;
+    flex: 1;
+    min-width: 0;
     overflow-x: auto;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
+    scrollbar-width: none;
   }
   .tab {
     display: flex;
     align-items: center;
+    flex: none;
     max-width: 360px;
-    border-radius: 7px 7px 0 0;
-    color: var(--muted);
+    height: 28px;
+    padding-right: 2px;
+    border-radius: var(--radius-md);
+    color: var(--ink-muted);
+    transition: background-color 120ms ease-out;
   }
   .tab:hover {
-    background: var(--hover);
+    background: var(--bg-200);
+    color: var(--ink);
   }
   .tab.active {
-    background: var(--bg);
-    color: var(--fg);
-    box-shadow: inset 0 2px 0 var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-strong);
   }
   .tab-label {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--space-2);
     min-width: 0;
     height: 100%;
-    padding: 0 4px 0 12px;
-    overflow: hidden;
+    padding: 0 var(--space-2) 0 var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 12px;
     white-space: nowrap;
+    overflow: hidden;
+  }
+  .tab .icon-btn {
+    width: 22px;
+    height: 22px;
+    color: inherit;
+    opacity: 0.6;
+  }
+  .tab .icon-btn:hover {
+    opacity: 1;
+  }
+  .add {
+    margin-left: var(--space-1);
   }
   .name {
     overflow: hidden;
@@ -250,39 +350,43 @@
     white-space: nowrap;
   }
   .sep {
-    color: var(--line);
-  }
-  .badge {
-    padding: 0 5px;
-    border-radius: 999px;
-    background: var(--accent);
-    color: var(--bg);
-    font-size: 10px;
-    font-weight: 700;
+    color: var(--line-control);
   }
   .dot {
     flex: none;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
     background: var(--dot);
   }
-  .tab-btn {
+  .top-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     flex: none;
-    width: 24px;
-    height: 24px;
-    margin-right: 2px;
-    border-radius: 5px;
-    opacity: 0.55;
   }
-  .tab-btn:hover {
-    opacity: 1;
-    background: var(--hover);
+  .palette-hint {
+    display: flex;
+    border-radius: var(--radius-sm);
+  }
+
+  /* ---- corpo ---- */
+  .body {
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    min-height: 0;
+  }
+  .body.with-panel {
+    grid-template-columns: 232px 1fr 280px;
+  }
+  .icon-btn.on {
+    color: var(--accent);
   }
   .terms {
     position: relative;
-    flex: 1;
+    min-width: 0;
     min-height: 0;
+    background: var(--bg-000);
   }
   .pane {
     position: absolute;
@@ -298,88 +402,104 @@
     margin: -0.5px;
   }
   .pane.focused {
-    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    border-color: var(--accent);
   }
   .pane header {
     display: flex;
     align-items: center;
-    gap: 7px;
-    height: 26px;
-    padding: 0 4px 0 10px;
+    gap: var(--space-2);
+    height: 32px;
+    padding: 0 var(--space-1) 0 var(--space-3);
     border-bottom: 1px solid var(--line);
-    background: var(--panel);
+    background: var(--bg-200);
+    font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--muted);
+    color: var(--ink-muted);
   }
   .pane.focused header {
-    color: var(--fg);
+    color: var(--ink);
   }
   .pane header .name {
     flex: 1;
   }
-  .pane header button {
-    width: 22px;
-    height: 22px;
-    border-radius: 4px;
+  .pane-status {
+    color: var(--ink-muted);
   }
-  .pane header button:hover {
-    background: var(--hover);
-  }
-  .body {
+  .pane-body {
     position: relative;
     flex: 1;
     min-height: 0;
   }
-  .empty {
-    display: grid;
-    place-content: center;
-    gap: 4px;
-    height: 100%;
-    text-align: center;
-    color: var(--muted);
-  }
-  .keys {
+
+  /* ---- barra de status ---- */
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: 0 var(--space-3);
+    border-top: 1px solid var(--line);
+    font-family: var(--font-mono);
     font-size: 12px;
+    color: var(--ink-muted);
+    white-space: nowrap;
+    overflow: hidden;
   }
-  kbd {
-    padding: 1px 5px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    font: 11px var(--mono);
+  .spacer {
+    flex: 1;
+  }
+
+  /* ---- avisos flutuantes ---- */
+  .notice {
+    position: fixed;
+    left: 50%;
+    top: 56px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    width: min(620px, calc(100vw - 32px));
+    box-sizing: border-box;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-lg);
+    background: var(--warning-soft);
+    box-shadow: var(--shadow-pop);
+    z-index: 20;
+  }
+  .notice div {
+    flex: 1;
+  }
+  .notice strong {
+    font-size: 15px;
+    line-height: 22px;
+  }
+  .notice p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ink-muted);
+  }
+  .notice-glyph {
+    font: 600 15px var(--font-mono);
+    color: var(--warning);
   }
   .toast {
     position: fixed;
-    right: 16px;
-    bottom: 16px;
+    right: var(--space-4);
+    bottom: 40px;
     display: flex;
-    gap: 12px;
+    gap: var(--space-3);
     align-items: flex-start;
     max-width: 480px;
-    padding: 12px 14px;
-    border-left: 3px solid #e5484d;
-    border-radius: 8px;
-    background: var(--panel);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+    padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-lg);
+    background: var(--bg-200);
+    box-shadow: var(--shadow-pop);
+    font-size: 13px;
     z-index: 20;
   }
-  .paused {
-    position: fixed;
-    left: 50%;
-    top: 12px;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 14px;
-    align-items: center;
-    max-width: min(640px, calc(100vw - 32px));
-    padding: 10px 12px 10px 16px;
-    border: 1px solid #f2b84b;
-    border-radius: 10px;
-    background: var(--panel);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
-    z-index: 20;
-  }
-  .toast button {
-    font-size: 16px;
-    color: var(--muted);
+  .toast-glyph {
+    font: 600 13px var(--font-mono);
+    color: var(--danger);
   }
 </style>

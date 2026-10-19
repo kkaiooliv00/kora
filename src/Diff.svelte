@@ -1,64 +1,96 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { Terminal } from '@xterm/xterm'
-  import { FitAddon } from '@xterm/addon-fit'
   import { invoke } from '@tauri-apps/api/core'
   import { app, chatById, chatDir } from './lib/state.svelte'
-  import { themeOf } from './lib/themes'
+  import { parseDiff, type DiffFile } from './lib/diff'
+
+  // Acima disso, cada arquivo mostra só o começo (diff gigante trava a janela).
+  const MAX_LINES_PER_FILE = 800
 
   const chat = app.active ? chatById(app.active) : undefined
   const dir = chat ? chatDir(chat) : app.projects[0]?.path
-  let el: HTMLDivElement
-  let term: Terminal | undefined
+  let files = $state<DiffFile[]>([])
+  let status = $state<string[]>([])
   let loading = $state(false)
+  let error = $state('')
+
+  const untracked = $derived(status.filter((l) => l.startsWith('??')).map((l) => l.slice(3)))
+  const branchLine = $derived(status.find((l) => l.startsWith('##'))?.slice(3) ?? '')
 
   async function refresh() {
-    if (!term || !dir) return
+    if (!dir) return
     loading = true
-    term.reset()
+    error = ''
     try {
-      const text = await invoke<string>('git_diff', { dir })
-      term.write(text.trim() ? text.replace(/\r?\n/g, '\r\n') : 'Sem mudanças.')
+      const changes = await invoke<{ status: string; diff: string }>('git_diff', { dir })
+      status = changes.status.split(/\r?\n/).filter(Boolean)
+      files = parseDiff(changes.diff)
     } catch (e) {
-      term.write(`\x1b[31m${e}\x1b[0m`)
+      error = String(e)
     } finally {
       loading = false
     }
   }
 
-  onMount(() => {
-    // Terminal só de leitura: o diff vem com as cores ANSI do próprio git.
-    const t = new Terminal({
-      fontFamily: app.settings.fontFamily,
-      fontSize: app.settings.fontSize - 1,
-      theme: themeOf(app.settings.theme),
-      disableStdin: true,
-      cursorBlink: false,
-      scrollback: 20000,
-    })
-    const fit = new FitAddon()
-    t.loadAddon(fit)
-    t.open(el)
-    fit.fit()
-    term = t
-    refresh()
-    return () => t.dispose()
-  })
+  refresh()
 </script>
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
 
 <div class="backdrop">
-  <div class="modal diff" role="dialog" aria-modal="true" aria-label="Diff">
+  <div class="modal diff" role="dialog" aria-modal="true" aria-label="Mudanças">
     <header>
-      <div>
-        <h2>Mudanças · {chat?.name ?? 'projeto'}</h2>
-        <p class="sub">{chat?.branch ? `${chat.branch} · ` : ''}{dir ?? 'nenhum projeto'}</p>
+      <div class="titles">
+        <h2>mudanças</h2>
+        <p class="sub">{chat?.name ?? 'projeto'} · {branchLine || dir || 'nenhum projeto'}</p>
       </div>
       <button class="btn" onclick={refresh} disabled={loading}>{loading ? 'Carregando…' : 'Atualizar'}</button>
-      <button class="btn" onclick={() => (app.modal = null)}>Fechar</button>
+      <button class="btn ghost" onclick={() => (app.modal = null)}>Fechar</button>
     </header>
-    <div class="view" bind:this={el}></div>
+
+    <div class="body">
+      {#if error}
+        <p class="error" role="alert">✗ {error}</p>
+      {:else if !loading && files.length === 0 && untracked.length === 0}
+        <p class="sub">✓ Nenhuma mudança em relação ao último commit.</p>
+      {/if}
+
+      {#each files as file (file.path)}
+        <section class="block">
+          <div class="head">
+            <span class="path">{file.path}</span>
+            <span class="count-add">+{file.added}</span>
+            <span class="count-del">-{file.removed}</span>
+          </div>
+          {#if file.binary}
+            <p class="note">arquivo binário</p>
+          {:else}
+            <div class="lines">
+              {#each file.lines.slice(0, MAX_LINES_PER_FILE) as line, i (i)}
+                {#if line.kind === 'hunk'}
+                  <div class="hunk">⋯ {line.text}</div>
+                {:else}
+                  <div class="line {line.kind}">
+                    <span class="no">{line.kind === 'del' ? line.oldNo : line.newNo}</span>
+                    <span class="mark">{line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ''}</span>
+                    <span class="code">{line.text}</span>
+                  </div>
+                {/if}
+              {/each}
+              {#if file.lines.length > MAX_LINES_PER_FILE}
+                <p class="note">… mais {file.lines.length - MAX_LINES_PER_FILE} linhas; abra no editor para ver tudo</p>
+              {/if}
+            </div>
+          {/if}
+        </section>
+      {/each}
+
+      {#if untracked.length > 0}
+        <p class="overline">arquivos novos (fora do diff)</p>
+        <ul class="untracked">
+          {#each untracked as path (path)}<li>{path}</li>{/each}
+        </ul>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -68,14 +100,14 @@
     flex-direction: column;
     width: min(1100px, calc(100vw - 32px));
     height: calc(100vh - 64px);
-    padding: 16px 18px;
+    padding: var(--space-4) var(--space-6);
   }
   header {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--space-2);
   }
-  header div {
+  .titles {
     flex: 1;
     min-width: 0;
   }
@@ -84,12 +116,86 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .view {
+  .body {
     flex: 1;
-    min-height: 0;
-    padding: 6px;
+    overflow-y: auto;
+  }
+  .block {
+    margin-bottom: var(--space-4);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--bg);
+    border-radius: var(--radius-md);
+    background: var(--bg-000);
+    overflow: hidden;
+    font: 13px/20px var(--font-mono);
+  }
+  .head {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-200);
+  }
+  .path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .count-add {
+    color: var(--success);
+  }
+  .count-del {
+    color: var(--danger);
+  }
+  .lines {
+    overflow-x: auto;
+  }
+  .line {
+    display: grid;
+    grid-template-columns: 56px 20px 1fr;
+    white-space: pre;
+  }
+  .line.add {
+    background: var(--success-soft);
+  }
+  .line.del {
+    background: var(--danger-soft);
+  }
+  .no {
+    padding-right: var(--space-3);
+    text-align: right;
+    color: var(--ink-faint);
+  }
+  .line.add .no,
+  .line.del .no {
+    color: var(--ink-muted);
+  }
+  .mark {
+    color: var(--ink-muted);
+  }
+  .line.add .mark {
+    color: var(--success);
+  }
+  .line.del .mark {
+    color: var(--danger);
+  }
+  .hunk {
+    padding: 2px var(--space-4);
+    background: var(--bg-200);
+    color: var(--ink-muted);
+    font-size: 12px;
+  }
+  .note {
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    color: var(--ink-muted);
+    font-size: 12px;
+  }
+  .untracked {
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+    font: 13px/20px var(--font-mono);
+    color: var(--ink-muted);
   }
 </style>

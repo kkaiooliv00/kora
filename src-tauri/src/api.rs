@@ -39,6 +39,7 @@ struct StatusEvent {
     chat: String,
     state: String,
     session: Option<String>,
+    detail: Option<Value>,
 }
 
 #[derive(Clone, Serialize)]
@@ -128,7 +129,8 @@ fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
     match route {
         Route::Status { chat, state } => {
             let session = session_id(&body);
-            let _ = app.emit("chat-status", StatusEvent { chat, state, session });
+            let detail = crate::hooks::detail(&body);
+            let _ = app.emit("chat-status", StatusEvent { chat, state, session, detail });
             let _ = req.respond(Response::empty(204u16));
         }
         Route::Cli(kind) => {

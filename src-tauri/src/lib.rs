@@ -1,6 +1,7 @@
 mod api;
 mod files;
 mod git;
+mod hooks;
 mod pty;
 mod tray;
 mod usage;
@@ -34,6 +35,7 @@ pub fn run() {
             git::git_worktree_add,
             git::git_worktree_remove,
             git::git_diff,
+            git::git_branch,
             tray::set_waiting,
             usage::usage_summary
         ])
