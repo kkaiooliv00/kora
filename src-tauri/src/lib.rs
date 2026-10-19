@@ -1,6 +1,7 @@
 mod api;
 mod files;
 mod pty;
+mod tray;
 
 use tauri::Manager;
 
@@ -13,6 +14,7 @@ pub fn run() {
         .setup(|app| {
             let api = api::start(app.handle().clone())?;
             app.manage(api);
+            tray::setup(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -23,7 +25,10 @@ pub fn run() {
             files::load_json,
             files::save_json,
             files::claude_settings,
-            files::open_url
+            files::open_url,
+            files::save_image,
+            files::open_in_editor,
+            tray::set_waiting
         ])
         .run(tauri::generate_context!())
         .expect("falha ao iniciar o Kora");

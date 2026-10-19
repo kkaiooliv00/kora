@@ -99,9 +99,9 @@ Qualquer agente consegue usar, porque todos sabem rodar comando de shell. Um MCP
 
 | Fase | Entrega | Itens |
 |---|---|---|
-| 0 | Toolchain + scaffold Tauri/Svelte/xterm, um shell abrindo | — |
-| 1 | **MVP**: projetos, perfis, árvore projeto→grupo→chat, abas, status, temas, notificações, links | 1, 3, 4, 5, C, O |
-| 2 | Produtividade | E, F, G, I, B, M, N, L |
+| 0 ✅ | Toolchain + scaffold Tauri/Svelte/xterm, um shell abrindo | — |
+| 1 ✅ | **MVP**: projetos, perfis, árvore projeto→grupo→chat, abas, status, temas, notificações, links | 1, 3, 4, 5, C, O |
+| 2 ✅ | Produtividade + bandeja | E, F, G, I, B, M, N, L, C |
 | 3 | Git | A, H |
 | 4 | Persistência + comunicação | D, 2 (`kora` CLI) |
 | 5 | Extras | J, K (reconexão) |

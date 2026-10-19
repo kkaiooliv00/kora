@@ -1,9 +1,22 @@
 use crate::api::{is_valid_id, Api};
 use serde_json::{json, Value};
-use std::{fs, io::ErrorKind, path::PathBuf, process::Command};
-use tauri::{AppHandle, Manager, State};
+use std::{
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tauri::{
+    ipc::{InvokeBody, Request},
+    AppHandle, Manager, State,
+};
 
 const JSON_FILES: [&str; 2] = ["config", "state"];
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+const JPEG_MAGIC: &[u8] = &[0xFF, 0xD8, 0xFF];
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -109,4 +122,77 @@ pub fn open_url(url: String, browser: Option<String>) -> Result<(), String> {
         return Ok(());
     }
     open_default(&url).map_err(|e| format!("não foi possível abrir o link: {e}"))
+}
+
+/// Grava a imagem colada (bytes crus do IPC) num arquivo temporário e devolve o caminho,
+/// que é colado no terminal para o agente ler.
+// ponytail: os prints acumulam no temp do sistema; limpar na inicialização se crescer.
+#[tauri::command]
+pub fn save_image(request: Request<'_>) -> Result<String, String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("esperava os bytes da imagem".into());
+    };
+    let ext = if bytes.starts_with(PNG_MAGIC) {
+        "png"
+    } else if bytes.starts_with(JPEG_MAGIC) {
+        "jpg"
+    } else {
+        return Err("formato de imagem não suportado (use PNG ou JPEG)".into());
+    };
+    let dir = std::env::temp_dir().join("kora-images");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default();
+    let path = dir.join(format!("print-{stamp}.{ext}"));
+    fs::write(&path, bytes).map_err(|e| format!("falha ao salvar a imagem: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Coloca entre aspas o que tem espaço, para a linha do `cmd /s /c`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn cmd_quote(arg: &str) -> String {
+    if arg.contains(' ') { format!("\"{arg}\"") } else { arg.to_string() }
+}
+
+/// Monta o processo do editor sem janela de console.
+fn editor_command(program: &str, args: &[String]) -> Result<Command, String> {
+    let (exe, prefix) = crate::pty::resolve_program(program)?;
+    let mut cmd = Command::new(&exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        // `.cmd` (ex.: code.cmd em "Microsoft VS Code\bin"): com /s o cmd só tira as aspas
+        // externas, então caminhos com espaço sobrevivem.
+        if prefix.first().is_some_and(|p| p == "/d") {
+            let script = prefix.last().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let line: Vec<String> = std::iter::once(script.as_str()).chain(args.iter().map(String::as_str)).map(cmd_quote).collect();
+            cmd.raw_arg(format!("/d /s /c \"{}\"", line.join(" ")));
+            return Ok(cmd);
+        }
+    }
+    cmd.args(prefix).args(args);
+    Ok(cmd)
+}
+
+#[tauri::command]
+pub fn open_in_editor(program: String, args: Vec<String>, path: String) -> Result<(), String> {
+    if !Path::new(&path).is_dir() {
+        return Err(format!("pasta não encontrada: {path}"));
+    }
+    let all_args: Vec<String> = args.into_iter().chain([path]).collect();
+    editor_command(&program, &all_args)?
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("não foi possível abrir o editor: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmd_quote;
+
+    #[test]
+    fn cmd_quote_wraps_only_paths_with_spaces() {
+        assert_eq!(cmd_quote(r"C:\Program Files\x.cmd"), r#""C:\Program Files\x.cmd""#);
+        assert_eq!(cmd_quote(r"C:\proj"), r"C:\proj");
+    }
 }

@@ -1,6 +1,7 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::{
     collections::HashMap,
+    ffi::OsString,
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
@@ -64,34 +65,31 @@ fn find_executable(program: &str, dirs: impl Iterator<Item = PathBuf>) -> Option
     })
 }
 
-/// Abre o agente direto, sem shell no meio (o PowerShell custava ~0,5 s por chat).
-fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, String> {
+/// Executável + argumentos iniciais para rodar `program`.
+/// No Windows: `.cmd`/`.bat` passam pelo `cmd /d /c` e `.ps1` pelo PowerShell.
+pub fn resolve_program(program: &str) -> Result<(OsString, Vec<OsString>), String> {
     if !cfg!(windows) {
-        let mut cmd = CommandBuilder::new(program);
-        cmd.args(args);
-        return Ok(cmd);
+        return Ok((program.into(), Vec::new()));
     }
     let path_var = std::env::var_os("PATH").unwrap_or_default();
     let exe = find_executable(program, std::env::split_paths(&path_var))
         .ok_or_else(|| format!("'{program}' não foi encontrado no PATH"))?;
     let ext = exe.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
-    // ponytail: cmd /c quebra se o caminho do .cmd tiver espaço E houver args com aspas;
-    // resolver com o parser de linha do cmd se aparecer.
-    let mut cmd = match ext.as_str() {
-        "cmd" | "bat" => {
-            let mut c = CommandBuilder::new("cmd.exe");
-            c.args(["/d", "/c"]);
-            c.arg(&exe);
-            c
-        }
-        "ps1" => {
-            let mut c = CommandBuilder::new("powershell.exe");
-            c.args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
-            c.arg(&exe);
-            c
-        }
-        _ => CommandBuilder::new(&exe),
-    };
+    let prefix = |args: &[&str]| args.iter().map(OsString::from).chain([exe.clone().into_os_string()]).collect();
+    Ok(match ext.as_str() {
+        "cmd" | "bat" => ("cmd.exe".into(), prefix(&["/d", "/c"])),
+        "ps1" => ("powershell.exe".into(), prefix(&["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])),
+        _ => (exe.clone().into_os_string(), Vec::new()),
+    })
+}
+
+/// Abre o agente direto, sem shell no meio (o PowerShell custava ~0,5 s por chat).
+// ponytail: cmd /c quebra se o caminho do .cmd tiver espaço E houver args com aspas;
+// resolver com o parser de linha do cmd se aparecer.
+fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, String> {
+    let (exe, prefix) = resolve_program(program)?;
+    let mut cmd = CommandBuilder::new(exe);
+    cmd.args(prefix);
     cmd.args(args);
     Ok(cmd)
 }

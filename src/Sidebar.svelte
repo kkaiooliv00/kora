@@ -11,8 +11,10 @@
     renameChat,
     moveChat,
     openChat,
+    splitChat,
     type Chat,
   } from './lib/state.svelte'
+  import { openInEditor } from './lib/automation'
 
   type Adding = { kind: 'chat' | 'group'; projectId: string; groupId?: string }
 
@@ -80,9 +82,9 @@
         class="label"
         draggable="true"
         ondragstart={() => (dragged = chat.id)}
-        onclick={() => openChat(chat.id)}
+        onclick={(e) => (e.altKey ? splitChat(chat.id) : openChat(chat.id))}
         ondblclick={() => (renaming = chat.id)}
-        title="Clique para abrir · duplo clique para renomear · arraste para um grupo"
+        title="Clique abre · Alt+clique abre ao lado · duplo clique renomeia · arraste para um grupo"
       >
         {chat.name}
       </button>
@@ -120,6 +122,7 @@
           <span class="name" title={project.path}>{project.name}</span>
           <button class="icon" title="Novo chat" onclick={() => toggle({ kind: 'chat', projectId: project.id })}>+</button>
           <button class="icon" title="Novo grupo" onclick={() => toggle({ kind: 'group', projectId: project.id })}>⊞</button>
+          <button class="icon" title="Abrir no editor" onclick={() => openInEditor(project.path)}>↗</button>
           <button class="icon" title="Remover projeto" onclick={() => removeProject(project.id)}>×</button>
         </div>
         {@render picker(project.id)}
@@ -152,7 +155,7 @@
   </div>
 
   <footer>
-    <button onclick={() => (app.showSettings = true)}>⚙ Configurações</button>
+    <button onclick={() => (app.modal = 'settings')}>⚙ Configurações</button>
   </footer>
 </aside>
 

@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { ask, open } from '@tauri-apps/plugin-dialog'
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
+import { DEFAULT_KEYS } from './keys'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings'
 
 export interface Profile {
   id: string
@@ -29,12 +30,28 @@ export interface Chat {
   projectId: string
   groupId?: string
 }
+export interface Snippet {
+  name: string
+  text: string
+  /** Nome do projeto; vazio = vale para todos. */
+  project?: string
+}
 export interface Settings {
   fontFamily: string
   fontSize: number
   theme: string
   /** Caminho do navegador; vazio procura o Chrome. */
   browser: string
+  /** Comando do editor; recebe a pasta do projeto no fim. */
+  editor: string
+  keys: Record<string, string>
+  snippets: Snippet[]
+}
+/** Uma aba com um ou mais chats lado a lado. */
+export interface Tab {
+  id: string
+  panes: string[]
+  vertical: boolean
 }
 
 export const STATUS: Record<Status, { label: string; color: string }> = {
@@ -61,6 +78,9 @@ const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
   theme: 'Grafite',
   browser: '',
+  editor: 'code',
+  keys: DEFAULT_KEYS,
+  snippets: [{ name: 'Revisar mudanças', text: 'Revise as mudanças não commitadas e aponte bugs e riscos.' }],
 }
 
 export const app = $state({
@@ -69,31 +89,45 @@ export const app = $state({
   projects: [] as Project[],
   groups: [] as Group[],
   chats: [] as Chat[],
-  open: [] as string[],
+  tabs: [] as Tab[],
+  activeTab: null as string | null,
+  /** Chat com foco (recebe snippets, busca, fila). */
   active: null as string | null,
   status: {} as Record<string, Status>,
-  showSettings: false,
+  /** Prompts esperando o agente ficar pronto, por chat. */
+  queue: {} as Record<string, string[]>,
+  modal: null as Modal | null,
+  paletteQuery: '',
+  /** Chat com a barra de busca aberta. */
+  searching: null as string | null,
   error: '',
 })
 
 const uid = () => crypto.randomUUID()
 
 export function fail(context: string, e: unknown) {
-  app.error = `${context}: ${e}`
+  app.error = `${context}: ${e instanceof Error ? e.message : e}`
 }
+
+export const chatById = (id: string) => app.chats.find((c) => c.id === id)
+export const projectOf = (chat: Chat) => app.projects.find((p) => p.id === chat.projectId)
 
 /** false = arquivo ilegível; nesse caso não salvamos para não sobrescrever os dados. */
 export async function load(): Promise<boolean> {
   try {
     const [config, state] = await Promise.all([
-      invoke<Partial<{ profiles: Profile[]; settings: Settings }> | null>('load_json', { name: 'config' }),
+      invoke<Partial<{ profiles: Profile[]; settings: Partial<Settings> }> | null>('load_json', { name: 'config' }),
       invoke<Partial<{ projects: Project[]; groups: Group[]; chats: Chat[] }> | null>('load_json', { name: 'state' }),
     ])
     const profiles = config?.profiles ?? DEFAULT_PROFILES
     // v0.1.0 salvou o perfil "gemini"; o comando certo é o agy.
     const legacyGemini = profiles.some((p) => p.id === 'gemini' && p.command === 'gemini')
     app.profiles = profiles.map((p) => (legacyGemini && p.id === 'gemini' ? AGY_PROFILE : p))
-    app.settings = { ...DEFAULT_SETTINGS, ...config?.settings }
+    app.settings = {
+      ...DEFAULT_SETTINGS,
+      ...config?.settings,
+      keys: { ...DEFAULT_KEYS, ...config?.settings?.keys },
+    }
     app.projects = state?.projects ?? []
     app.groups = state?.groups ?? []
     app.chats = (state?.chats ?? []).map((c) => (legacyGemini && c.profileId === 'gemini' ? { ...c, profileId: 'agy' } : c))
@@ -108,6 +142,8 @@ export function save(config: unknown, state: unknown) {
   invoke('save_json', { name: 'config', value: config }).catch((e) => fail('Falha ao salvar configuração', e))
   invoke('save_json', { name: 'state', value: state }).catch((e) => fail('Falha ao salvar projetos', e))
 }
+
+// ---- projetos, grupos e chats ----
 
 export async function addProject() {
   const path = await open({ directory: true, title: 'Pasta do projeto' })
@@ -124,7 +160,7 @@ export async function removeProject(id: string) {
     kind: 'warning',
   })
   if (!confirmed) return
-  app.chats.filter((c) => c.projectId === id).forEach((c) => closeTab(c.id))
+  app.chats.filter((c) => c.projectId === id).forEach((c) => closePane(c.id))
   app.chats = app.chats.filter((c) => c.projectId !== id)
   app.groups = app.groups.filter((g) => g.projectId !== id)
   app.projects = app.projects.filter((p) => p.id !== id)
@@ -158,43 +194,77 @@ export function moveChat(id: string, projectId: string, groupId?: string) {
 }
 
 export function removeChat(id: string) {
-  closeTab(id)
+  closePane(id)
   app.chats = app.chats.filter((c) => c.id !== id)
 }
 
-export function openChat(id: string) {
-  if (!app.open.includes(id)) app.open.push(id)
+// ---- abas e painéis ----
+
+export const tabOf = (id: string) => app.tabs.find((t) => t.panes.includes(id))
+export const isOpen = (id: string) => tabOf(id) !== undefined
+export const openIds = () => app.tabs.flatMap((t) => t.panes)
+
+export function focusChat(id: string) {
+  const tab = tabOf(id)
+  if (!tab) return
+  app.activeTab = tab.id
   app.active = id
 }
 
-/** Fechar a aba encerra o processo; o chat continua na árvore. */
-export function closeTab(id: string) {
-  app.open = app.open.filter((x) => x !== id)
+export function openChat(id: string) {
+  if (!isOpen(id)) app.tabs.push({ id: uid(), panes: [id], vertical: false })
+  focusChat(id)
+}
+
+const withoutPane = (tabs: Tab[], id: string) =>
+  tabs.map((t) => ({ ...t, panes: t.panes.filter((p) => p !== id) })).filter((t) => t.panes.length > 0)
+
+/** Coloca o chat ao lado do que está em foco; se ele já estiver aberto em outra aba, move. */
+export function splitChat(id: string) {
+  const target = app.tabs.find((t) => t.id === app.activeTab)
+  if (!target || target.panes.includes(id)) return openChat(id)
+  app.tabs = withoutPane(app.tabs, id).map((t) => (t.id === target.id ? { ...t, panes: [...t.panes, id] } : t))
+  focusChat(id)
+}
+
+/** Tira o chat da divisão e põe numa aba só dele. */
+export function popOut(id: string) {
+  if ((tabOf(id)?.panes.length ?? 0) < 2) return
+  app.tabs = [...withoutPane(app.tabs, id), { id: uid(), panes: [id], vertical: false }]
+  focusChat(id)
+}
+
+/** Fecha o painel e encerra o processo; o chat continua na árvore. */
+export function closePane(id: string) {
+  const tab = tabOf(id)
+  if (!tab) return
+  const index = app.tabs.findIndex((t) => t.id === tab.id)
+  app.tabs = withoutPane(app.tabs, id)
   delete app.status[id]
-  if (app.active === id) app.active = app.open.at(-1) ?? null
-}
-
-export function setStatus(id: string, status: Status) {
-  if (app.status[id] !== status) app.status[id] = status
-}
-
-export async function notify(title: string, body: string) {
-  try {
-    const granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
-    if (granted) sendNotification({ title, body })
-  } catch (e) {
-    fail('Falha ao notificar', e)
+  delete app.queue[id]
+  if (app.searching === id) app.searching = null
+  if (app.active !== id) return
+  const next = tabOf(tab.panes.find((p) => p !== id) ?? '') ?? app.tabs[Math.min(index, app.tabs.length - 1)]
+  const nextChat = next?.panes.find((p) => p !== id)
+  if (nextChat) focusChat(nextChat)
+  else {
+    app.active = null
+    app.activeTab = null
   }
 }
 
-/** Status vindo dos hooks do Claude Code; notifica se o chat não está à vista. */
-export function onHookStatus(id: string, status: Status) {
-  if (!app.open.includes(id)) return
-  const previous = app.status[id]
-  setStatus(id, status)
-  const chat = app.chats.find((c) => c.id === id)
-  const unseen = !document.hasFocus() || app.active !== id
-  if (!chat || !unseen) return
-  if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')
-  else if (status === 'idle' && previous === 'running') notify(chat.name, 'Terminou')
+export function closeTab(tabId: string) {
+  const tab = app.tabs.find((t) => t.id === tabId)
+  ;[...(tab?.panes ?? [])].forEach(closePane)
+}
+
+export function cycleTab(step: number) {
+  if (app.tabs.length === 0) return
+  const index = app.tabs.findIndex((t) => t.id === app.activeTab)
+  const tab = app.tabs[(index + step + app.tabs.length) % app.tabs.length]
+  focusChat(tab.panes[0])
+}
+
+export function toggleDirection() {
+  app.tabs = app.tabs.map((t) => (t.id === app.activeTab ? { ...t, vertical: !t.vertical } : t))
 }
