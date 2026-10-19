@@ -95,7 +95,8 @@ fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, Strin
     Ok(cmd)
 }
 
-/// Variáveis que o `kora-cli` usa, e a pasta do Kora (onde ele está instalado) no PATH.
+/// Variáveis que o `kora-cli` usa, e a pasta do Kora (onde ele está instalado) no fim do PATH,
+/// para nunca sombrear comandos do sistema.
 fn kora_env(builder: &mut CommandBuilder, api: &Api, chat: Option<&str>) {
     builder.env("KORA_PORT", api.port.to_string());
     builder.env("KORA_TOKEN", &api.token);
@@ -106,7 +107,7 @@ fn kora_env(builder: &mut CommandBuilder, api: &Api, chat: Option<&str>) {
         return;
     };
     let path = std::env::var_os("PATH").unwrap_or_default();
-    if let Ok(joined) = std::env::join_paths(std::iter::once(app_dir).chain(std::env::split_paths(&path))) {
+    if let Ok(joined) = std::env::join_paths(std::env::split_paths(&path).chain(std::iter::once(app_dir))) {
         builder.env("PATH", joined);
     }
 }

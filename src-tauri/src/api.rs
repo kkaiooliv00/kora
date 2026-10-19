@@ -114,11 +114,10 @@ fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
         let _ = req.respond(Response::empty(403u16));
         return;
     };
-    let mut body = String::new();
-    if req.as_reader().take(MAX_BODY).read_to_string(&mut body).is_err() {
-        let _ = req.respond(Response::from_string("corpo inválido (use UTF-8)").with_status_code(400u16));
-        return;
-    }
+    // Corpo truncado ou com UTF-8 quebrado não pode derrubar o status: lê o que der.
+    let mut raw = Vec::new();
+    let _ = req.as_reader().take(MAX_BODY).read_to_end(&mut raw);
+    let body = String::from_utf8_lossy(&raw).into_owned();
     let from = req
         .headers()
         .iter()

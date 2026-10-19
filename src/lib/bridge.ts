@@ -42,10 +42,25 @@ function list(from: string | null): string {
     .join('\n')
 }
 
-function send(target: string, text: string, from: string | null): string {
+/**
+ * A mensagem vira uma linha de texto puro: quebras de linha viram espaço e os demais
+ * caracteres de controle (ESC incluso) somem. Sem isso, um `ESC[201~` fecharia o
+ * bracketed paste e o resto viraria teclas cruas no outro chat (ex.: aprovar permissões).
+ */
+export function sanitizeMessage(text: string): string {
+  return text
+    .replace(/\r\n|\r|\n|\t/g, ' ')
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, '')
+    .trim()
+}
+
+function send(target: string, raw: string, from: string | null): string {
   const chat = findChat(target)
-  if (!text.trim()) throw new Error('mensagem vazia')
+  const text = sanitizeMessage(raw)
+  if (!text) throw new Error('mensagem vazia')
   if (chat.id === from) throw new Error('não dá para mandar mensagem para você mesmo')
+  const profile = app.profiles.find((p) => p.id === chat.profileId)
+  if (!profile?.command.trim()) throw new Error(`"${chat.name}" é um shell, não um agente; mensagens só vão para chats de IA`)
   const terminal = openTerminal(chat)
   if (!admitAgentMessage()) {
     throw new Error(
@@ -53,7 +68,7 @@ function send(target: string, text: string, from: string | null): string {
     )
   }
   const sender = from ? chatById(from)?.name : undefined
-  terminal.submit(`[mensagem de ${sender ?? 'outro processo'}] ${text.trim()}`)
+  terminal.submit(`[mensagem de ${sender ?? 'outro processo'}] ${text}`)
   return `enviado para ${chat.name}`
 }
 

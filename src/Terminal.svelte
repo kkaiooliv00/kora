@@ -17,15 +17,20 @@
   const IDLE_MS = 2500
   // Tempo para o TUI processar a colagem antes do Enter.
   const SUBMIT_DELAY_MS = 120
-  // Se o claude --resume sai com erro antes disso, a sessão salva não serve mais.
-  const RESUME_FAIL_MS = 10_000
+  // Só a mensagem do Claude de sessão inexistente faz esquecer a sessão salva
+  // (login expirado, rede fora ou Ctrl+C também saem com erro e não devem perder a conversa).
+  const RESUME_GONE = /No conversation found/i
+  const RESUME_WATCH_BYTES = 8192
 
-  /** Instrução que o Claude recebe para saber conversar com os outros chats. */
-  const koraPrompt = (name: string) =>
-    `Você está rodando dentro do Kora como o chat "${name}". Outros chats de IA abertos no Kora ` +
-    'podem ser contatados pelo terminal com o comando kora-cli: `kora-cli list` (lista os chats), ' +
-    '`kora-cli send <chat> <mensagem>` (envia um prompt ao chat), `kora-cli wait <chat>` (espera ele terminar) e ' +
-    '`kora-cli read <chat> [linhas]` (lê a tela dele). Use apenas quando o usuário pedir colaboração entre chats. ' +
+  /**
+   * Instrução que o Claude recebe para saber conversar com os outros chats.
+   * Texto fixo, sem aspas duplas nem nome do chat: passa por `cmd /c` quando o claude é um .cmd.
+   */
+  const KORA_PROMPT =
+    'Você está rodando dentro do Kora. Outros chats de IA abertos no Kora podem ser contatados pelo terminal ' +
+    'com o comando kora-cli: kora-cli list (lista os chats; o seu aparece como você), ' +
+    'kora-cli send <chat> <mensagem> (envia um prompt ao chat), kora-cli wait <chat> (espera ele terminar) e ' +
+    'kora-cli read <chat> [linhas] (lê a tela dele). Use apenas quando o usuário pedir colaboração entre chats. ' +
     'Mensagens de outros chats chegam prefixadas com [mensagem de <chat>]; responda com kora-cli send quando fizer sentido.'
 
   let { chat, visible }: { chat: Chat; visible: boolean } = $props()
@@ -45,7 +50,7 @@
     const isClaude = profile?.hooks === 'claude'
     if (isClaude) {
       if (chat.sessionId) args.push('--resume', chat.sessionId)
-      args.push('--append-system-prompt', koraPrompt(chat.name))
+      args.push('--append-system-prompt', KORA_PROMPT)
       args.push('--settings', await invoke<string>('claude_settings', { chat: chat.id }))
     }
     return { program, args, resumed: isClaude && Boolean(chat.sessionId) }
@@ -69,6 +74,7 @@
   /** Print colado vira arquivo temporário; o caminho é colado para o agente ler. */
   function pasteImage(t: Terminal) {
     return (e: ClipboardEvent) => {
+      noteHumanInput()
       // Excel/Word copiam texto + imagem juntos: aí o texto vence.
       if (e.clipboardData?.types.includes('text/plain')) return
       const items = Array.from(e.clipboardData?.items ?? [])
@@ -113,9 +119,9 @@
     let id: number | undefined
     let stopped = false
     let resumed = false
-    let startedAt = 0
-    // true enquanto o próprio Kora cola texto (fila, broadcast, kora-cli), para não contar como você.
-    let automated = false
+    // Começo da saída de um `claude --resume`, para reconhecer "No conversation found".
+    let resumeOutput = ''
+    const decoder = new TextDecoder()
     // Depois do unmount o processo ainda manda saída/saída-de-exit; ignorar para não ressuscitar o status.
     let disposed = false
     const write = (data: string) => id !== undefined && invoke('pty_write', { id, data })
@@ -124,6 +130,7 @@
     onData.onmessage = (buf) => {
       if (disposed) return
       t.write(new Uint8Array(buf))
+      if (resumed && resumeOutput.length < RESUME_WATCH_BYTES) resumeOutput += decoder.decode(buf, { stream: true })
       if (!heuristic) return
       setStatus(chat.id, 'running')
       clearTimeout(idleTimer)
@@ -136,7 +143,7 @@
       stopped = true
       clearTimeout(idleTimer)
       setStatus(chat.id, code === 0 ? 'done' : 'error')
-      if (resumed && code !== 0 && Date.now() - startedAt < RESUME_FAIL_MS) {
+      if (resumed && RESUME_GONE.test(resumeOutput)) {
         updateChat(chat.id, { sessionId: undefined })
         t.write('\r\n\x1b[33m[não deu para retomar a conversa anterior — Enter abre uma nova]\x1b[0m\r\n')
         return
@@ -151,7 +158,7 @@
       spawnArgs()
         .then(({ program, args, resumed: isResume }) => {
           resumed = isResume
-          startedAt = Date.now()
+          resumeOutput = ''
           return invoke<number>('pty_spawn', { chat: chat.id, program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit })
         })
         .then((pty) => {
@@ -166,8 +173,9 @@
     }
     start()
 
+    // Só tecla de verdade conta como você (onData também traz respostas automáticas do terminal).
+    t.onKey(() => noteHumanInput())
     t.onData((data) => {
-      if (!automated) noteHumanInput()
       if (id !== undefined) write(data)
       else if (stopped && data === '\r') {
         t.reset()
@@ -176,18 +184,10 @@
     })
     t.onResize(({ cols, rows }) => id !== undefined && invoke('pty_resize', { id, cols, rows }))
 
-    const pasteAutomated = (text: string) => {
-      automated = true
-      try {
-        t.paste(text)
-      } finally {
-        automated = false
-      }
-    }
     terminals.set(chat.id, {
       paste: (text) => t.paste(text),
       submit: (text) => {
-        pasteAutomated(text)
+        t.paste(text)
         setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
       },
       read: (lines) => {
