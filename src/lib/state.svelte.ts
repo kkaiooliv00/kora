@@ -3,7 +3,7 @@ import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff'
 
 export interface Profile {
   id: string
@@ -29,6 +29,9 @@ export interface Chat {
   profileId: string
   projectId: string
   groupId?: string
+  /** Pasta do git worktree próprio (vazio = pasta do projeto). */
+  cwd?: string
+  branch?: string
 }
 export interface Snippet {
   name: string
@@ -177,11 +180,25 @@ export function removeGroup(id: string) {
   app.groups = app.groups.filter((g) => g.id !== id)
 }
 
-export function addChat(projectId: string, profileId: string, groupId?: string) {
+/** `worktree`: o chat ganha um git worktree e uma branch `kora/...` só dele. */
+export async function addChat(projectId: string, profileId: string, groupId?: string, worktree = false) {
   const profile = app.profiles.find((p) => p.id === profileId)
-  if (!profile) return
+  const project = app.projects.find((p) => p.id === projectId)
+  if (!profile || !project) return
   const count = app.chats.filter((c) => c.projectId === projectId && c.profileId === profileId).length
   const chat: Chat = { id: uid(), name: `${profile.name} ${count + 1}`, profileId, projectId, groupId }
+  if (worktree) {
+    try {
+      const created = await invoke<{ path: string; branch: string }>('git_worktree_add', {
+        project: project.path,
+        name: `${chat.name}-${chat.id.slice(0, 6)}`,
+      })
+      chat.cwd = created.path
+      chat.branch = created.branch
+    } catch (e) {
+      return fail('Worktree não criado', e)
+    }
+  }
   app.chats.push(chat)
   openChat(chat.id)
 }
@@ -194,10 +211,21 @@ export function moveChat(id: string, projectId: string, groupId?: string) {
   app.chats = app.chats.map((c) => (c.id === id ? { ...c, projectId, groupId } : c))
 }
 
-export function removeChat(id: string) {
+/** Com worktree, pergunta se apaga a pasta também (a branch sempre fica). */
+export async function removeChat(id: string) {
+  const chat = chatById(id)
+  if (!chat) return
   closePane(id)
   app.chats = app.chats.filter((c) => c.id !== id)
+  if (!chat.cwd) return
+  const remove = await ask(`Apagar também o worktree em ${chat.cwd}? A branch ${chat.branch} continua no repositório.`, {
+    title: 'Remover chat',
+    kind: 'warning',
+  })
+  if (remove) invoke('git_worktree_remove', { path: chat.cwd }).catch((e) => fail('Worktree mantido', e))
 }
+
+export const chatDir = (chat: Chat) => chat.cwd ?? projectOf(chat)?.path
 
 // ---- abas e painéis ----
 

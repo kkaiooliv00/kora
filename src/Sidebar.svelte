@@ -20,6 +20,7 @@
 
   let adding = $state<Adding | null>(null)
   let groupName = $state('')
+  let isolated = $state(false)
   let renaming = $state<string | null>(null)
   let dragged: string | null = null
 
@@ -31,8 +32,9 @@
 
   function pickProfile(profileId: string) {
     if (!adding) return
-    addChat(adding.projectId, profileId, adding.groupId)
+    addChat(adding.projectId, profileId, adding.groupId, isolated)
     adding = null
+    isolated = false
   }
 
   function submitGroup(e: SubmitEvent) {
@@ -87,6 +89,7 @@
         title="Clique abre · Alt+clique abre ao lado · duplo clique renomeia · arraste para um grupo"
       >
         {chat.name}
+        {#if chat.branch}<span class="branch" title={`${chat.branch} · ${chat.cwd}`}>⎇</span>{/if}
       </button>
     {/if}
     <button class="icon" title="Remover chat" onclick={() => removeChat(chat.id)}>×</button>
@@ -100,6 +103,9 @@
         {#each app.profiles as profile (profile.id)}
           <button onclick={() => pickProfile(profile.id)}>{profile.name}</button>
         {/each}
+        <label class="isolated" title="Cria um git worktree e uma branch kora/... só para este chat">
+          <input type="checkbox" bind:checked={isolated} /> worktree isolado
+        </label>
       </div>
     {:else}
       <form class="picker" onsubmit={submitGroup}>
@@ -299,6 +305,19 @@
     background: var(--bg);
     color: var(--fg);
     font: inherit;
+  }
+  .isolated {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .branch {
+    margin-left: 4px;
+    color: var(--accent);
   }
   .hint {
     padding: 8px;

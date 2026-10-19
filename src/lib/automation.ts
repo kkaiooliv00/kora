@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
-import { app, chatById, fail, isOpen, projectOf, type Snippet, type Status } from './state.svelte'
+import { app, chatById, chatDir, fail, isOpen, projectOf, type Snippet, type Status } from './state.svelte'
 import { terminals } from './terminals'
 import { splitCommand } from './command'
 
@@ -58,7 +58,7 @@ export function openInEditor(path: string | undefined) {
 
 export function openActiveInEditor() {
   const chat = app.active ? chatById(app.active) : undefined
-  openInEditor(chat ? projectOf(chat)?.path : app.projects[0]?.path)
+  openInEditor(chat ? chatDir(chat) : app.projects[0]?.path)
 }
 
 async function notify(title: string, body: string) {

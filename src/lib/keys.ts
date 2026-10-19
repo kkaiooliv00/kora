@@ -9,6 +9,7 @@ export const DEFAULT_KEYS: Record<string, string> = {
   broadcast: 'Ctrl+Shift+B',
   queue: 'Ctrl+Shift+Q',
   editor: 'Ctrl+Shift+E',
+  diff: 'Ctrl+Shift+G',
   settings: 'Ctrl+,',
 }
 

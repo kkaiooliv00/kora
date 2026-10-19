@@ -1,5 +1,6 @@
 mod api;
 mod files;
+mod git;
 mod pty;
 mod tray;
 
@@ -28,6 +29,9 @@ pub fn run() {
             files::open_url,
             files::save_image,
             files::open_in_editor,
+            git::git_worktree_add,
+            git::git_worktree_remove,
+            git::git_diff,
             tray::set_waiting
         ])
         .run(tauri::generate_context!())

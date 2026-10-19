@@ -7,7 +7,7 @@
   import { SearchAddon } from '@xterm/addon-search'
   import { invoke, Channel } from '@tauri-apps/api/core'
   import '@xterm/xterm/css/xterm.css'
-  import { app, fail, focusChat, type Chat } from './lib/state.svelte'
+  import { app, chatDir, fail, focusChat, type Chat } from './lib/state.svelte'
   import { setStatus } from './lib/automation'
   import { terminals } from './lib/terminals'
   import { splitCommand } from './lib/command'
@@ -122,7 +122,7 @@
       t.write(`\r\n\x1b[2m[${label} encerrado (${code}) — Enter para reabrir]\x1b[0m\r\n`)
     }
 
-    const cwd = app.projects.find((p) => p.id === chat.projectId)?.path
+    const cwd = chatDir(chat)
     function start() {
       stopped = false
       t.write(`\x1b[2miniciando ${label}…\x1b[0m\r\n`)

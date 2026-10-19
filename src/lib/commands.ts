@@ -37,6 +37,7 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   broadcast: { label: 'Broadcast: enviar para vários chats', run: () => (app.modal = 'broadcast') },
   queue: { label: 'Fila de prompts do chat em foco', run: () => app.active && (app.modal = 'queue') },
   editor: { label: 'Abrir projeto no editor', run: openActiveInEditor },
+  diff: { label: 'Ver mudanças (git diff) do chat em foco', run: () => (app.modal = 'diff') },
   settings: { label: 'Configurações', run: () => (app.modal = 'settings') },
 }
 
@@ -60,8 +61,15 @@ export function buildCommands(): Command[] {
   const created = app.projects.flatMap((p) =>
     app.profiles.map((profile) => ({ id: `new:${p.id}:${profile.id}`, label: `Novo ${profile.name} em ${p.name}`, run: () => addChat(p.id, profile.id) })),
   )
+  const worktrees = app.projects.flatMap((p) =>
+    app.profiles.map((profile) => ({
+      id: `worktree:${p.id}:${profile.id}`,
+      label: `Novo ${profile.name} em worktree de ${p.name}`,
+      run: () => addChat(p.id, profile.id, undefined, true),
+    })),
+  )
   const editors = app.projects.map((p) => ({ id: `editor:${p.id}`, label: `Abrir no editor: ${p.name}`, run: () => openInEditor(p.path) }))
-  return [...actions, ...extras, ...snippets, ...chats, ...created, ...editors]
+  return [...actions, ...extras, ...snippets, ...chats, ...created, ...worktrees, ...editors]
 }
 
 /** Todas as palavras da busca precisam aparecer no rótulo (sem acento e sem caixa). */

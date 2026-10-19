@@ -8,6 +8,7 @@
   import Palette from './Palette.svelte'
   import Broadcast from './Broadcast.svelte'
   import Queue from './Queue.svelte'
+  import Diff from './Diff.svelte'
   import {
     app,
     load,
@@ -162,6 +163,7 @@
   {#if app.modal === 'palette'}{#key app.paletteOpens}<Palette />{/key}{/if}
   {#if app.modal === 'broadcast'}<Broadcast />{/if}
   {#if app.modal === 'queue'}<Queue />{/if}
+  {#if app.modal === 'diff'}<Diff />{/if}
 
   {#if app.error}
     <div class="toast" role="alert">
