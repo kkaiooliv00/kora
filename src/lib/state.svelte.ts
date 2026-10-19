@@ -4,7 +4,7 @@ import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage'
 
 export interface Profile {
   id: string
@@ -13,6 +13,8 @@ export interface Profile {
   command: string
   /** 'claude' liga o status preciso via hooks. */
   hooks?: 'claude'
+  /** Reabre sozinho quando o processo cai com erro (ex.: ssh que perdeu a conexão). */
+  reconnect?: boolean
 }
 export interface Project {
   id: string

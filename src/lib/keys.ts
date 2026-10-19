@@ -10,6 +10,7 @@ export const DEFAULT_KEYS: Record<string, string> = {
   queue: 'Ctrl+Shift+Q',
   editor: 'Ctrl+Shift+E',
   diff: 'Ctrl+Shift+G',
+  usage: 'Ctrl+Shift+U',
   settings: 'Ctrl+,',
 }
 

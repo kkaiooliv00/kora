@@ -9,6 +9,7 @@
   import Broadcast from './Broadcast.svelte'
   import Queue from './Queue.svelte'
   import Diff from './Diff.svelte'
+  import Usage from './Usage.svelte'
   import {
     app,
     load,
@@ -169,6 +170,7 @@
   {#if app.modal === 'broadcast'}<Broadcast />{/if}
   {#if app.modal === 'queue'}<Queue />{/if}
   {#if app.modal === 'diff'}<Diff />{/if}
+  {#if app.modal === 'usage'}<Usage />{/if}
 
   {#if app.agentsPaused}
     <div class="paused" role="alert">

@@ -3,6 +3,7 @@ mod files;
 mod git;
 mod pty;
 mod tray;
+mod usage;
 
 use tauri::Manager;
 
@@ -33,7 +34,8 @@ pub fn run() {
             git::git_worktree_add,
             git::git_worktree_remove,
             git::git_diff,
-            tray::set_waiting
+            tray::set_waiting,
+            usage::usage_summary
         ])
         .run(tauri::generate_context!())
         .expect("falha ao iniciar o Kora");

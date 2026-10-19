@@ -98,7 +98,11 @@
         </label>
         <label class="wide">
           Perfis de IA
-          <span class="help"><code>command</code> é o que roda no terminal; <code>"hooks": "claude"</code> liga o status preciso.</span>
+          <span class="help">
+            <code>command</code> é o que roda no terminal; <code>"hooks": "claude"</code> liga o status preciso;
+            <code>"reconnect": true</code> reabre sozinho se cair. SSH:
+            <code>{'{ "id": "srv", "name": "Claude no servidor", "command": "ssh -t user@host \"cd /app && claude\"", "reconnect": true }'}</code>
+          </span>
           <textarea bind:value={profilesText} rows="10" spellcheck="false"></textarea>
         </label>
         <label class="wide">

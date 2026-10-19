@@ -39,6 +39,7 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   queue: { label: 'Fila de prompts do chat em foco', run: () => app.active && (app.modal = 'queue') },
   editor: { label: 'Abrir projeto no editor', run: openActiveInEditor },
   diff: { label: 'Ver mudanças (git diff) do chat em foco', run: () => (app.modal = 'diff') },
+  usage: { label: 'Uso de tokens (Claude e Codex)', run: () => (app.modal = 'usage') },
   settings: { label: 'Configurações', run: () => (app.modal = 'settings') },
 }
 

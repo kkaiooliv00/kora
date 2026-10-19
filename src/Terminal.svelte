@@ -21,6 +21,11 @@
   // (login expirado, rede fora ou Ctrl+C também saem com erro e não devem perder a conversa).
   const RESUME_GONE = /No conversation found/i
   const RESUME_WATCH_BYTES = 8192
+  // Perfis com "reconnect": espera 2, 4, 8… s (até 30) entre tentativas; desiste depois de 6 seguidas.
+  const RECONNECT_MAX_TRIES = 6
+  const RECONNECT_MAX_DELAY_S = 30
+  // Ficou de pé esse tempo: a conexão era boa, então zera a contagem de tentativas.
+  const RECONNECT_STABLE_MS = 60_000
 
   /**
    * Instrução que o Claude recebe para saber conversar com os outros chats.
@@ -119,6 +124,9 @@
     let id: number | undefined
     let stopped = false
     let resumed = false
+    let startedAt = 0
+    let reconnectTries = 0
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined
     // Começo da saída de um `claude --resume`, para reconhecer "No conversation found".
     let resumeOutput = ''
     const decoder = new TextDecoder()
@@ -148,12 +156,26 @@
         t.write('\r\n\x1b[33m[não deu para retomar a conversa anterior — Enter abre uma nova]\x1b[0m\r\n')
         return
       }
+      if (profile?.reconnect && code !== 0) {
+        if (Date.now() - startedAt > RECONNECT_STABLE_MS) reconnectTries = 0
+        if (reconnectTries < RECONNECT_MAX_TRIES) {
+          reconnectTries += 1
+          const delay = Math.min(RECONNECT_MAX_DELAY_S, 2 ** reconnectTries)
+          t.write(`\r\n\x1b[33m[conexão caiu (${code}) — reconectando em ${delay} s, tentativa ${reconnectTries}/${RECONNECT_MAX_TRIES}; Enter reconecta já]\x1b[0m\r\n`)
+          reconnectTimer = setTimeout(start, delay * 1000)
+          return
+        }
+        reconnectTries = 0
+      }
       t.write(`\r\n\x1b[2m[${label} encerrado (${code}) — Enter para reabrir]\x1b[0m\r\n`)
     }
 
     const cwd = chatDir(chat)
     function start() {
+      clearTimeout(reconnectTimer)
+      if (disposed) return
       stopped = false
+      startedAt = Date.now()
       t.write(`\x1b[2miniciando ${label}…\x1b[0m\r\n`)
       spawnArgs()
         .then(({ program, args, resumed: isResume }) => {
@@ -208,6 +230,7 @@
 
     return () => {
       disposed = true
+      clearTimeout(reconnectTimer)
       ro.disconnect()
       el.removeEventListener('paste', onPaste, true)
       el.removeEventListener('focusin', onFocus)

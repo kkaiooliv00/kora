@@ -104,7 +104,7 @@ Qualquer agente consegue usar, porque todos sabem rodar comando de shell. Um MCP
 | 2 ✅ | Produtividade + bandeja | E, F, G, I, B, M, N, L, C |
 | 3 ✅ | Git | A, H |
 | 4 ✅ | Persistência + comunicação | D, 2 (`kora-cli`) |
-| 5 | Extras | J, K (reconexão) |
+| 5 ✅ | Extras | J, K (reconexão) |
 
 Cada fase termina com o app rodando no Windows; o build no Linux é validado via CI (GitHub Actions, `ubuntu-latest`) a partir da fase 1.
 
@@ -120,3 +120,16 @@ Cada fase termina com o app rodando no Windows; o build no Linux é validado via
 - `rustup` (stable, MSVC) — **ausente hoje**
 - WebView2 — ok (155.x)
 - Node 24 — ok
+
+## Fase 6 — identidade visual (design handoff)
+
+Pacote `kora-design-handoff.zip` (tokens, fontes, logos, componentes, 5 telas). Decisões (2026-10-19):
+
+- **Meio-termo**: agentes continuam com a interface própria no terminal; o Kora acrescenta painel lateral
+  (plano via TodoWrite, permissões, % de contexto) e cartão de aprovação a partir dos hooks do Claude.
+- **Tema Kora padrão** (tokens do design) na interface; cores e fonte do terminal continuam configuráveis.
+- **Permissões do Claude** (Sempre/Perguntar/Nunca + listas permitidos/bloqueados) viram regras no
+  `--settings` gerado por chat. Codex/Agy: aviso de que não se aplica.
+- Telas: 03 paleta (grupos, destaque), 04 boas-vindas (estado vazio), 05 configurações com navegação
+  lateral, abas/barra lateral/barra de status, diff no estilo do bloco da tela 02, status com glifo.
+- Ícones de linha: Lucide.
