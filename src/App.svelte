@@ -401,11 +401,11 @@
   .body {
     grid-row: 3;
     display: grid;
-    grid-template-columns: 232px 1fr;
+    grid-template-columns: 288px 1fr;
     min-height: 0;
   }
   .body.with-panel {
-    grid-template-columns: 232px 1fr 280px;
+    grid-template-columns: 288px 1fr 280px;
   }
   .icon-btn.on {
     color: var(--accent);

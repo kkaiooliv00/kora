@@ -55,6 +55,16 @@
     }
   }
 
+  const OPEN_FOLDER = '__open-folder'
+
+  /** "Abrir nova pasta…" no fim da lista: cada pasta aberta vira um projeto. */
+  function onPick(e: Event & { currentTarget: HTMLSelectElement }) {
+    const value = e.currentTarget.value
+    if (value !== OPEN_FOLDER) return void (projectId = value)
+    e.currentTarget.value = project?.id ?? ''
+    openFolder()
+  }
+
   async function openFolder() {
     await addProject()
     projectId = app.projects.at(-1)?.id ?? projectId
@@ -91,15 +101,16 @@
           <span>Diretório</span>
           <span class="select">
             <FolderOpen size={14} strokeWidth={1.5} />
-            <select value={project?.id} onchange={(e) => (projectId = e.currentTarget.value)} aria-label="Diretório do projeto">
+            <select value={project?.id} onchange={onPick} aria-label="Diretório do projeto">
               {#each app.projects as p (p.id)}
                 <option value={p.id}>{p.name}</option>
               {/each}
+              <option value={OPEN_FOLDER}>+ Abrir nova pasta…</option>
             </select>
           </span>
         </label>
         {#if branch}<span class="badge">{branch}</span>{/if}
-        <button class="btn ghost sm" onclick={openFolder}>Abrir outra pasta</button>
+        <button class="btn ghost sm" onclick={openFolder}>Abrir nova pasta</button>
       </div>
 
       <div class="prompt">
