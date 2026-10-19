@@ -47,6 +47,7 @@
   import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS, openPalette } from './lib/commands'
   import { menuState } from './lib/menu.svelte'
+  import { themeOf } from './lib/themes'
   import { comboOf, normalizeCombo } from './lib/keys'
 
   const SAVE_DELAY_MS = 300
@@ -234,7 +235,7 @@
   <div class="body" class:with-panel={showPanel}>
     <Sidebar />
 
-    <main class="terms">
+    <main class="terms" style:--term-bg={themeOf(app.settings.theme).background}>
       {#each panes as { tab, index, chat } (chat.id)}
         {@const visible = tab.id === app.activeTab}
         {@const split = tab.panes.length > 1}
@@ -414,7 +415,7 @@
     position: relative;
     min-width: 0;
     min-height: 0;
-    background: var(--bg-000);
+    background: var(--term-bg, var(--bg-000));
   }
   .pane {
     position: absolute;

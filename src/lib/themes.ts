@@ -39,6 +39,9 @@ function palette(background: string, foreground: string, cursor: string, selecti
 /** Temas do terminal. A interface segue sempre a marca Kora; só o terminal muda. */
 export const THEMES: Record<string, ITheme> = {
   Kora: KORA,
+  // Fundo bg-100 (o da barra lateral): o terminal some na interface. ANSI puxado para azul/ciano.
+  'Kora Azul': palette('#0f1519', '#e2eaed', '#3cc8d4', '#0e4f5a',
+    '#1c262c #ff8a6b #7fd69b #e8b852 #5aa9e6 #a99cf0 #3cc8d4 #93a3ab #5a6d77 #ffb29c #a6e7b9 #f2d08a #8cc4f0 #c8bff7 #7fe0e8 #e2eaed'),
   Grafite: {
     background: '#16181d',
     foreground: '#d7dae0',
