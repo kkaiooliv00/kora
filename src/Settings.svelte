@@ -272,7 +272,7 @@
         </label>
       {:else if section === 'snippets'}
         <h2>snippets</h2>
-        <p class="lead">Prompts prontos, colados pela paleta no chat em foco. <code>"project"</code> (nome do projeto) limita a um projeto.</p>
+        <p class="lead">Prompts prontos, colados pela paleta no chat em foco. <code>"project"</code> (nome do projeto) limita a um projeto. Campos como <code>{'{número}'}</code> no texto são perguntados antes de colar.</p>
         <label class="field">
           Snippets
           <textarea bind:value={snippetsText} rows="16" spellcheck="false"></textarea>

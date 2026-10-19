@@ -14,6 +14,9 @@ export const DEFAULT_KEYS: Record<string, string> = {
   panel: 'Ctrl+Shift+L',
   agents: 'Ctrl+Shift+A',
   board: 'Ctrl+Shift+K',
+  history: 'Ctrl+Shift+H',
+  prevPrompt: 'Ctrl+Shift+ArrowUp',
+  nextPrompt: 'Ctrl+Shift+ArrowDown',
   settings: 'Ctrl+,',
 }
 

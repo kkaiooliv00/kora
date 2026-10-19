@@ -2,6 +2,7 @@ mod api;
 mod checkpoint;
 mod files;
 mod git;
+mod history;
 mod hooks;
 mod project;
 mod pty;
@@ -50,6 +51,9 @@ pub fn run() {
             stats::pty_stats,
             checkpoint::checkpoints,
             checkpoint::restore_checkpoint,
+            history::search_history,
+            history::conversation_markdown,
+            history::save_text,
             usage::usage_summary
         ])
         .run(tauri::generate_context!())

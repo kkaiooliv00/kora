@@ -298,3 +298,8 @@ kbd {
     animation: none !important;
   }
 }
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}

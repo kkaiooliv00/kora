@@ -18,6 +18,12 @@ const state = {
     { id: 'c-2', name: 'Codex 1', profileId: 'codex', projectId: 'p-api', groupId: 'g-rev', lastActive: now - 26 * HOUR },
     { id: 'c-4', name: 'Claude 3', profileId: 'claude', projectId: 'p-api', groupId: 'g-rev', sessionId: 's-4' },
     { id: 'c-3', name: 'Claude 2', profileId: 'claude', projectId: 'p-web', branch: 'kora/claude-2', cwd: 'C:/x', lastActive: now - 72 * HOUR },
+    { id: 'c-5', name: 'Claude antigo', profileId: 'claude', projectId: 'p-api', archived: true, lastActive: now - 200 * HOUR },
+  ],
+  tasks: [
+    { id: 't-a', projectId: 'p-api', text: 'Paginar a listagem de pedidos', column: 'todo' },
+    { id: 't-b', projectId: 'p-api', text: 'Migrar config para TOML', column: 'doing', chatId: 'c-1' },
+    { id: 't-c', projectId: 'p-api', text: 'Revisar o fluxo de login', column: 'review', chatId: 'c-4' },
   ],
   tabs: new URLSearchParams(location.search).has('welcome')
     ? []
@@ -83,6 +89,20 @@ export function installMocks() {
         }
       case 'usage_summary':
         return { rows: usageRows(), files: 12 }
+      case 'pty_stats':
+        return Object.fromEntries((payload.ids as number[]).map((id) => [id, { cpu: 3.2 * id, memory: 180_000_000 + id * 40_000_000 }]))
+      case 'checkpoints':
+        return [
+          { ref: 'refs/kora/checkpoints/c-1/0001792430000000', time: now - 600_000, label: 'Migrar config para TOML' },
+          { ref: 'refs/kora/checkpoints/c-1/0001792420000000', time: now - 3 * HOUR, label: 'Rodar os testes e resumir falhas' },
+        ]
+      case 'search_history':
+        return [
+          { session: 's-1', time: new Date(now - HOUR).toISOString(), role: 'user', snippet: `…preciso migrar a config para ${payload.query} sem quebrar…` },
+          { session: 's-4', time: new Date(now - 5 * HOUR).toISOString(), role: 'assistant', snippet: `Feito: o arquivo ${payload.query} agora é lido no boot…` },
+        ]
+      case 'free_port':
+        return 51234
       default:
         return null
     }

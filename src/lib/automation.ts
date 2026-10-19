@@ -38,9 +38,26 @@ export function activeSnippets(): Snippet[] {
   return app.settings.snippets.filter((s) => !s.project || s.project === project)
 }
 
+/** Campos `{nome}` de um snippet, na ordem em que aparecem, sem repetir. */
+const FIELD = /\{([^{}\n]{1,40})\}/g
+
+export function templateFields(text: string): string[] {
+  return [...new Set([...text.matchAll(FIELD)].map((m) => m[1].trim()))].filter(Boolean)
+}
+
+export function fillTemplate(text: string, values: Record<string, string>): string {
+  return text.replace(FIELD, (whole, name: string) => values[name.trim()] ?? whole)
+}
+
+/** Cola o snippet no chat em foco; se tiver campos `{nome}`, pergunta os valores antes. */
 export function pasteSnippet(text: string) {
   const terminal = app.active ? terminals.get(app.active) : undefined
   if (!terminal) return fail('Snippet', 'abra um chat primeiro')
+  if (templateFields(text).length > 0) {
+    app.template = text
+    app.modal = 'template'
+    return
+  }
   terminal.paste(text)
 }
 

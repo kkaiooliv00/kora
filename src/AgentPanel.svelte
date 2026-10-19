@@ -40,7 +40,7 @@
       return
     }
     invoke<Checkpoint[]>('checkpoints', { dir, chat: id })
-      .then((list) => app.active === id && (checkpoints = list))
+      .then((list) => app.active === id && (checkpoints = list ?? []))
       .catch(() => (checkpoints = []))
   })
 

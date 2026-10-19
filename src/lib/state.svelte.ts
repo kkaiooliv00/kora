@@ -7,7 +7,7 @@ import { dismiss, toast } from './toasts.svelte'
 import type { Queue } from './queue'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare' | 'history' | 'template'
 
 export interface Profile {
   id: string
@@ -58,6 +58,8 @@ export interface Chat {
   branch?: string
   /** Shell que roda o projeto para o chat `runOf` (mesma pasta; não é dono do worktree). */
   runOf?: string
+  /** Fora da barra lateral (fica em "chats arquivados"); a conversa e o worktree continuam. */
+  archived?: boolean
   /** Sessão do Claude, para retomar a conversa ao reabrir. */
   sessionId?: string
   /** Última vez aberto (ms), para a lista de recentes. */
@@ -111,6 +113,8 @@ export interface Tab {
   id: string
   panes: string[]
   vertical: boolean
+  /** Tamanho de cada painel em %, na ordem de `panes` (vazio = divisão igual). */
+  sizes?: number[]
 }
 
 /** Estado nunca só por cor: cada um tem glifo e palavra (regra do design). */
@@ -167,6 +171,8 @@ export const app = $state({
   chats: [] as Chat[],
   tasks: [] as Task[],
   tabs: [] as Tab[],
+  /** Largura da barra lateral em px (arrastável, 240–360). */
+  sidebarWidth: 288,
   /** Projetos e grupos recolhidos na barra lateral. */
   collapsed: {} as Record<string, boolean>,
   activeTab: null as string | null,
@@ -179,6 +185,8 @@ export const app = $state({
   editingProject: null as string | null,
   /** Muda quando um chat ganha ponto de restauração (o painel recarrega a lista). */
   checkpointRev: {} as Record<string, number>,
+  /** Snippet com campos `{nome}` esperando os valores. */
+  template: '',
   /** Grupo mostrado na página de comparação. */
   comparing: null as string | null,
   /** Prompts esperando o agente ficar pronto, por chat. */
@@ -208,6 +216,7 @@ export function fail(context: string, e: unknown) {
 
 export const chatById = (id: string) => app.chats.find((c) => c.id === id)
 export const projectOf = (chat: Chat) => app.projects.find((p) => p.id === chat.projectId)
+export const profileOf = (chat: Chat) => app.profiles.find((p) => p.id === chat.profileId)
 
 /** false = arquivo ilegível; nesse caso não salvamos para não sobrescrever os dados. */
 export async function load(): Promise<boolean> {
@@ -261,6 +270,7 @@ export interface SavedState {
   activeTab: string | null
   active: string | null
   collapsed: Record<string, boolean>
+  sidebarWidth?: number
 }
 
 export const savedState = (): SavedState => ({
@@ -272,10 +282,12 @@ export const savedState = (): SavedState => ({
   activeTab: app.activeTab,
   active: app.active,
   collapsed: app.collapsed,
+  sidebarWidth: app.sidebarWidth,
 })
 
 function restoreTabs(state: Partial<SavedState>) {
   app.collapsed = state.collapsed ?? {}
+  app.sidebarWidth = state.sidebarWidth ?? app.sidebarWidth
   const known = new Set(app.chats.map((c) => c.id))
   app.tabs = (state.tabs ?? [])
     .map((t) => ({ ...t, panes: t.panes.filter((id) => known.has(id)) }))
@@ -411,6 +423,12 @@ export async function addChat(projectId: string, profileId: string, groupId?: st
   app.chats.push(chat)
   openChat(chat.id)
   return chat.id
+}
+
+/** Arquivar fecha o painel; desarquivar só devolve o chat à barra lateral. */
+export function archiveChat(id: string, archived: boolean) {
+  if (archived) closePane(id)
+  updateChat(id, { archived })
 }
 
 export function renameChat(id: string, name: string) {

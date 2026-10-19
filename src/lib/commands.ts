@@ -13,6 +13,8 @@ import {
   STATUS,
 } from './state.svelte'
 import { activeSnippets, openActiveInEditor, openInEditor, pasteSnippet, resumeAgents } from './automation'
+import { terminals } from './terminals'
+import { toast } from './toasts.svelte'
 
 /** Grupos da paleta, na ordem em que aparecem (tela 03 do design). */
 export const GROUPS = ['ações', 'sessões', 'novo chat', 'snippets', 'projetos'] as const
@@ -31,6 +33,15 @@ export interface Command {
   /** Rótulo em mono (nomes de sessão e caminhos). */
   mono?: boolean
   run: () => void
+}
+
+function copyLastReply() {
+  const text = app.active ? terminals.get(app.active)?.lastReply() : ''
+  if (!text) return toast({ tone: 'info', title: 'Nada para copiar', text: 'Envie um prompt neste chat primeiro.' })
+  navigator.clipboard
+    .writeText(text)
+    .then(() => toast({ tone: 'success', title: 'Resposta copiada', text: `${text.split('\n').length} linhas` }))
+    .catch((e) => toast({ tone: 'danger', title: 'Não foi possível copiar', text: String(e) }))
 }
 
 export function openPalette(query = '') {
@@ -56,7 +67,11 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   panel: { label: 'Mostrar ou esconder o painel do agente', run: () => (app.showPanel = !app.showPanel) },
   settings: { label: 'Configurações', run: () => (app.modal = 'settings') },
   agents: { label: 'Painel de todos os agentes', run: () => (app.modal = 'agents') },
+  prevPrompt: { label: 'Ir ao prompt anterior', run: () => app.active && terminals.get(app.active)?.jumpPrompt(-1) },
+  nextPrompt: { label: 'Ir ao próximo prompt', run: () => app.active && terminals.get(app.active)?.jumpPrompt(1) },
+  copyReply: { label: 'Copiar a última resposta do chat em foco', run: copyLastReply },
   board: { label: 'Quadro de tarefas', run: () => (app.modal = 'board') },
+  history: { label: 'Buscar em todas as conversas', run: () => (app.modal = 'history') },
   compare: {
     label: 'Comparar agentes: mesmo prompt em vários',
     run: () => {

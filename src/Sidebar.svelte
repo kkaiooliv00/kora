@@ -14,6 +14,7 @@
     moveChat,
     openChat,
     runProject,
+    archiveChat,
     splitChat,
     closePane,
     isOpen,
@@ -22,6 +23,8 @@
     type Project,
   } from './lib/state.svelte'
   import { openInEditor } from './lib/automation'
+  import { exportChat } from './lib/export'
+  import Archive from '@lucide/svelte/icons/archive'
   import { openMenu, type MenuItem } from './lib/menu.svelte'
   import { groupViews, shortAgo, summary, type GroupView } from './lib/sidebar'
   import Plus from '@lucide/svelte/icons/plus'
@@ -71,8 +74,11 @@
   const working = $derived(Object.values(app.status).filter((s) => s === 'running').length)
   const waiting = $derived(Object.values(app.status).filter((s) => s === 'waiting').length)
 
-  const chatsIn = (project: Project) => app.chats.filter((c) => c.projectId === project.id)
-  const viewsOf = (project: Project) => groupViews(project.id, app.chats, app.groups, branches[project.id] ?? '')
+  const liveChats = $derived(app.chats.filter((c) => !c.archived))
+  const chatsIn = (project: Project) => liveChats.filter((c) => c.projectId === project.id)
+  const archivedIn = (project: Project) => app.chats.filter((c) => c.projectId === project.id && c.archived)
+  const viewsOf = (project: Project) => groupViews(project.id, liveChats, app.groups, branches[project.id] ?? '')
+  let showArchived = $state<Record<string, boolean>>({})
   const isSelected = (view: GroupView) => (picked !== null ? picked === view.key : view.chats.some((c) => c.id === app.active))
   const statusesOf = (chats: Chat[]) => chats.map((c) => app.status[c.id])
   const flip = (id: string) => (app.collapsed[id] = !app.collapsed[id])
@@ -138,6 +144,8 @@
       },
       { label: 'Renomear', shortcut: 'F2', run: () => (renaming = chat.id) },
       { label: 'Duplicar chat', run: () => addChat(chat.projectId, chat.profileId, chat.groupId) },
+      { label: 'Exportar conversa…', run: () => exportChat(chat.id) },
+      { label: 'Arquivar', run: () => archiveChat(chat.id, true) },
       { separator: true },
       { label: 'Encerrar chat', disabled: !isOpen(chat.id), run: () => closePane(chat.id) },
       { label: 'Remover chat', danger: true, run: () => removeChat(chat.id) },
@@ -359,6 +367,28 @@
       <button class="icon-btn hover" title="Novo chat" aria-label="Novo chat" onclick={() => toggle({ kind: 'chat', projectId: project.id })}><Plus {...ICON} /></button>
     </div>
     {@render picker(project.id)}
+
+    {#if !collapsed && archivedIn(project).length}
+      {@const archived = archivedIn(project)}
+      <button class="archived" aria-expanded={!!showArchived[project.id]} onclick={() => (showArchived[project.id] = !showArchived[project.id])}>
+        <span class="n">{archived.length}</span>
+        <span class="archived-label">{archived.length === 1 ? 'chat arquivado' : 'chats arquivados'}</span>
+        {#if showArchived[project.id]}<ChevronDown size={14} strokeWidth={1.5} />{:else}<ChevronRight size={14} strokeWidth={1.5} />{/if}
+      </button>
+      {#if showArchived[project.id]}
+        <ul class="archived-list">
+          {#each archived as chat (chat.id)}
+            <li class="chat">
+              <button class="chat-btn" title="Desarquivar e abrir" onclick={() => (archiveChat(chat.id, false), openChat(chat.id))} oncontextmenu={(e) => chatMenu(e, chat)}>
+                <span class="glyph"><Archive size={12} strokeWidth={1.5} /></span>
+                <span class="chat-name">{chat.name}</span>
+                <span class="ago">{shortAgo(chat.lastActive, now)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
 
     {#if !collapsed}
       {#if chats.length === 0 && views.length === 0}
@@ -642,6 +672,40 @@
     color: var(--warning);
   }
 
+  .archived {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    margin: 2px 0 6px;
+    padding: 0 10px 0 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    color: var(--ink-muted);
+    text-align: left;
+  }
+  .archived:hover {
+    background: var(--bg-200);
+  }
+  .archived .n {
+    display: inline-grid;
+    place-items: center;
+    min-width: 22px;
+    height: 20px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 3px;
+    background: var(--bg-300);
+    color: var(--ink);
+    font: 500 11px var(--font-mono);
+  }
+  .archived-label {
+    flex: 1;
+    font-size: 13px;
+  }
+  .archived-list {
+    margin-bottom: var(--space-2);
+  }
   .empty {
     display: flex;
     flex-direction: column;

@@ -10,6 +10,10 @@ export interface TerminalHandle {
   read(lines: number): string
   /** Id do PTY no backend (medidor de CPU/memória); vazio enquanto o processo não abriu. */
   pty(): number | undefined
+  /** Rola até o prompt anterior (-1) ou o próximo (1) que você enviou. */
+  jumpPrompt(direction: -1 | 1): void
+  /** Texto depois do último prompt enviado (a resposta do agente, como aparece na tela). */
+  lastReply(): string
 }
 
 /** Terminais montados, por id do chat. Cada Terminal.svelte se registra ao montar. */

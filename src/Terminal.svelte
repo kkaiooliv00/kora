@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { Terminal } from '@xterm/xterm'
+  import { Terminal, type IMarker } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import { WebglAddon } from '@xterm/addon-webgl'
   import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -244,10 +244,20 @@
     }
     start()
 
+    // Marcador em cada prompt enviado: navegar entre prompts e copiar só a última resposta.
+    const prompts: IMarker[] = []
+    const markPrompt = () => {
+      const marker = t.registerMarker(0)
+      if (!marker) return
+      prompts.push(marker)
+      marker.onDispose(() => prompts.splice(prompts.indexOf(marker), 1))
+    }
+
     // Só tecla de verdade conta como você (onData também traz respostas automáticas do terminal).
-    t.onKey(() => {
+    t.onKey(({ domEvent }) => {
       noteHumanInput()
       clearPermission(chat.id)
+      if (domEvent.key === 'Enter' && !domEvent.shiftKey) markPrompt()
     })
     t.onData((data) => {
       if (id !== undefined) write(data)
@@ -261,6 +271,7 @@
     terminals.set(chat.id, {
       paste: (text) => t.paste(text),
       submit: (text) => {
+        markPrompt()
         t.paste(text)
         setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
       },
@@ -276,6 +287,24 @@
         return out.join('\n').trimEnd()
       },
       pty: () => id,
+      jumpPrompt: (direction) => {
+        const top = t.buffer.active.viewportY
+        const lines = prompts.map((m) => m.line).filter((l) => l >= 0)
+        const target = direction < 0 ? lines.filter((l) => l < top).at(-1) : lines.find((l) => l > top)
+        if (target === undefined) {
+          if (direction > 0) t.scrollToBottom()
+          return
+        }
+        t.scrollToLine(target)
+      },
+      lastReply: () => {
+        const from = prompts.at(-1)?.line
+        if (from === undefined || from < 0) return ''
+        const buffer = t.buffer.active
+        const out: string[] = []
+        for (let i = from + 1; i < buffer.length; i++) out.push(buffer.getLine(i)?.translateToString(true) ?? '')
+        return out.join('\n').trim()
+      },
     })
 
     const onPaste = pasteImage(t)

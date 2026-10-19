@@ -22,6 +22,8 @@
   import Agents from './Agents.svelte'
   import Board from './Board.svelte'
   import Compare from './Compare.svelte'
+  import History from './History.svelte'
+  import Template from './Template.svelte'
   import Play from '@lucide/svelte/icons/play'
   import Kbd from './Kbd.svelte'
   import ToastStack from './ToastStack.svelte'
@@ -56,6 +58,7 @@
   import { themeOf } from './lib/themes'
   import { watchStats } from './lib/stats.svelte'
   import { watchBudget } from './lib/budget'
+  import { SIDEBAR, clampSidebar, dragDivider, paneSizes } from './lib/resize'
   import { comboOf, normalizeCombo } from './lib/keys'
 
   const SAVE_DELAY_MS = 300
@@ -159,11 +162,55 @@
   )
 
   function paneStyle(tab: Tab, index: number): string {
-    const size = 100 / tab.panes.length
-    const start = index * size
+    const sizes = paneSizes(tab.sizes, tab.panes.length)
+    const size = sizes[index]
+    const start = sizes.slice(0, index).reduce((a, b) => a + b, 0)
     return tab.vertical
       ? `top:${start}%;height:${size}%;left:0;width:100%`
       : `left:${start}%;width:${size}%;top:0;height:100%`
+  }
+
+  let termsEl = $state<HTMLElement>()
+  const activeTabObj = $derived(app.tabs.find((t) => t.id === app.activeTab))
+
+  /** Arrastar a divisória `index` (entre os painéis index e index+1) da aba em foco. */
+  function startPaneDrag(e: PointerEvent, tab: Tab, index: number) {
+    if (!termsEl) return
+    e.preventDefault()
+    const handle = e.currentTarget as HTMLElement
+    handle.setPointerCapture(e.pointerId)
+    const box = termsEl.getBoundingClientRect()
+    const move = (ev: PointerEvent) => {
+      const pct = tab.vertical ? ((ev.clientY - box.top) / box.height) * 100 : ((ev.clientX - box.left) / box.width) * 100
+      const current = app.tabs.find((t) => t.id === tab.id)
+      if (!current) return
+      const sizes = dragDivider(paneSizes(current.sizes, current.panes.length), index, pct, tab.vertical ? box.height : box.width)
+      app.tabs = app.tabs.map((t) => (t.id === tab.id ? { ...t, sizes } : t))
+    }
+    const up = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+  }
+
+  function startSidebarDrag(e: PointerEvent) {
+    e.preventDefault()
+    const handle = e.currentTarget as HTMLElement
+    handle.setPointerCapture(e.pointerId)
+    const move = (ev: PointerEvent) => (app.sidebarWidth = clampSidebar(ev.clientX))
+    const up = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+  }
+
+  const dividerStyle = (tab: Tab, index: number) => {
+    const at = paneSizes(tab.sizes, tab.panes.length).slice(0, index + 1).reduce((a, b) => a + b, 0)
+    return tab.vertical ? `top:${at}%` : `left:${at}%`
   }
 
   const comboKeys = (combo: string | undefined) => (combo ? normalizeCombo(combo).split('+') : [])
@@ -244,10 +291,17 @@
     </div>
   {/if}
 
-  <div class="body" class:with-panel={showPanel}>
+  <div class="body" class:with-panel={showPanel} style:--side="{app.sidebarWidth}px">
     <Sidebar />
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="side-resize"
+      title="Arraste para ajustar a largura (duplo clique volta ao padrão)"
+      onpointerdown={startSidebarDrag}
+      ondblclick={() => (app.sidebarWidth = SIDEBAR.default)}
+    ></div>
 
-    <main class="terms" style:--term-bg={themeOf(app.settings.theme).background}>
+    <main class="terms" bind:this={termsEl} style:--term-bg={themeOf(app.settings.theme).background}>
       {#each panes as { tab, index, chat } (chat.id)}
         {@const visible = tab.id === app.activeTab}
         {@const split = tab.panes.length > 1}
@@ -290,6 +344,19 @@
           </div>
         </section>
       {/each}
+      {#if hasTab && activeTabObj && activeTabObj.panes.length > 1}
+        {#each activeTabObj.panes.slice(0, -1) as id, index (id)}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="divider"
+            class:vertical={activeTabObj.vertical}
+            style={dividerStyle(activeTabObj, index)}
+            title="Arraste para redimensionar (duplo clique divide igual)"
+            onpointerdown={(e) => startPaneDrag(e, activeTabObj, index)}
+            ondblclick={() => (app.tabs = app.tabs.map((t) => (t.id === activeTabObj.id ? { ...t, sizes: undefined } : t)))}
+          ></div>
+        {/each}
+      {/if}
       {#if !hasTab}<Welcome />{/if}
     </main>
     {#if showPanel}<AgentPanel />{/if}
@@ -315,6 +382,8 @@
   {#if app.modal === 'agents'}<Agents />{/if}
   {#if app.modal === 'board'}<Board />{/if}
   {#if app.modal === 'compare'}<Compare />{/if}
+  {#if app.modal === 'history'}<History />{/if}
+  {#if app.modal === 'template'}<Template />{/if}
 
   <ToastStack />
   <Menu />
@@ -421,13 +490,48 @@
 
   /* ---- corpo ---- */
   .body {
+    position: relative;
     grid-row: 3;
     display: grid;
-    grid-template-columns: 288px 1fr;
+    grid-template-columns: var(--side, 288px) 1fr;
     min-height: 0;
   }
   .body.with-panel {
-    grid-template-columns: 288px 1fr 280px;
+    grid-template-columns: var(--side, 288px) 1fr 280px;
+  }
+  .side-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--side, 288px) - 3px);
+    width: 6px;
+    cursor: col-resize;
+    z-index: 3;
+  }
+  .side-resize:hover {
+    background: var(--accent-soft);
+  }
+  .divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    margin-left: -3px;
+    cursor: col-resize;
+    z-index: 3;
+  }
+  .divider.vertical {
+    top: auto;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: 6px;
+    margin: -3px 0 0;
+    cursor: row-resize;
+  }
+  .divider:hover {
+    background: var(--accent-soft);
   }
   .icon-btn.on {
     color: var(--accent);
