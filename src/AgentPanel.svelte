@@ -3,9 +3,11 @@
   import { CATEGORIES, type Policy } from './lib/permissions'
   import EmptyState from './EmptyState.svelte'
 
-  // Janela de contexto padrão do Claude; acima disso o modelo é de 1M (variante [1m]).
+  // Janela de contexto padrão do Claude; 1M na variante [1m], acima de 200k ou nos Opus que já vêm com 1M.
+  // ponytail: tabela por nome de modelo; o tamanho exato só chega no JSON da statusline, que é do usuário.
   const DEFAULT_WINDOW = 200_000
   const LARGE_WINDOW = 1_000_000
+  const LARGE_BY_DEFAULT = /\[1m\]|opus-(4-[6-9]|[5-9])/
 
   const POLICY: Record<Policy, { text: string; tone: string }> = {
     allow: { text: '✓ sempre', tone: 'success' },
@@ -18,7 +20,7 @@
   const isClaude = $derived(app.profiles.find((p) => p.id === chat?.profileId)?.hooks === 'claude')
   const info = $derived(app.active ? app.agentInfo[app.active] : undefined)
   const contextWindow = $derived(
-    info?.context && (info.context.tokens > DEFAULT_WINDOW || info.context.model.includes('1m')) ? LARGE_WINDOW : DEFAULT_WINDOW,
+    info?.context && (info.context.tokens > DEFAULT_WINDOW || LARGE_BY_DEFAULT.test(info.context.model)) ? LARGE_WINDOW : DEFAULT_WINDOW,
   )
   const contextPct = $derived(info?.context ? Math.min(100, Math.round((info.context.tokens / contextWindow) * 100)) : 0)
   const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
