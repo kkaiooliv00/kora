@@ -7,8 +7,8 @@
   import { SearchAddon } from '@xterm/addon-search'
   import { invoke, Channel } from '@tauri-apps/api/core'
   import '@xterm/xterm/css/xterm.css'
-  import { app, chatDir, fail, focusChat, type Chat } from './lib/state.svelte'
-  import { setStatus } from './lib/automation'
+  import { app, chatDir, fail, focusChat, updateChat, type Chat } from './lib/state.svelte'
+  import { noteHumanInput, setStatus } from './lib/automation'
   import { terminals } from './lib/terminals'
   import { splitCommand } from './lib/command'
   import { themeOf } from './lib/themes'
@@ -17,6 +17,16 @@
   const IDLE_MS = 2500
   // Tempo para o TUI processar a colagem antes do Enter.
   const SUBMIT_DELAY_MS = 120
+  // Se o claude --resume sai com erro antes disso, a sessão salva não serve mais.
+  const RESUME_FAIL_MS = 10_000
+
+  /** Instrução que o Claude recebe para saber conversar com os outros chats. */
+  const koraPrompt = (name: string) =>
+    `Você está rodando dentro do Kora como o chat "${name}". Outros chats de IA abertos no Kora ` +
+    'podem ser contatados pelo terminal com o comando kora-cli: `kora-cli list` (lista os chats), ' +
+    '`kora-cli send <chat> <mensagem>` (envia um prompt ao chat), `kora-cli wait <chat>` (espera ele terminar) e ' +
+    '`kora-cli read <chat> [linhas]` (lê a tela dele). Use apenas quando o usuário pedir colaboração entre chats. ' +
+    'Mensagens de outros chats chegam prefixadas com [mensagem de <chat>]; responda com kora-cli send quando fizer sentido.'
 
   let { chat, visible }: { chat: Chat; visible: boolean } = $props()
   let el: HTMLDivElement
@@ -29,13 +39,16 @@
   const profile = app.profiles.find((p) => p.id === chat.profileId)
   const label = profile?.command ? splitCommand(profile.command)[0] : 'shell'
 
-  async function spawnArgs(): Promise<{ program: string | null; args: string[] }> {
+  async function spawnArgs(): Promise<{ program: string | null; args: string[]; resumed: boolean }> {
     const [program, ...args] = splitCommand(profile?.command ?? '')
-    if (!program) return { program: null, args: [] }
-    if (profile?.hooks === 'claude') {
+    if (!program) return { program: null, args: [], resumed: false }
+    const isClaude = profile?.hooks === 'claude'
+    if (isClaude) {
+      if (chat.sessionId) args.push('--resume', chat.sessionId)
+      args.push('--append-system-prompt', koraPrompt(chat.name))
       args.push('--settings', await invoke<string>('claude_settings', { chat: chat.id }))
     }
-    return { program, args }
+    return { program, args, resumed: isClaude && Boolean(chat.sessionId) }
   }
 
   /** Ctrl+V vira paste do navegador (texto e imagem); Ctrl+C com seleção copia. */
@@ -99,6 +112,10 @@
     let idleTimer: ReturnType<typeof setTimeout> | undefined
     let id: number | undefined
     let stopped = false
+    let resumed = false
+    let startedAt = 0
+    // true enquanto o próprio Kora cola texto (fila, broadcast, kora-cli), para não contar como você.
+    let automated = false
     // Depois do unmount o processo ainda manda saída/saída-de-exit; ignorar para não ressuscitar o status.
     let disposed = false
     const write = (data: string) => id !== undefined && invoke('pty_write', { id, data })
@@ -119,6 +136,11 @@
       stopped = true
       clearTimeout(idleTimer)
       setStatus(chat.id, code === 0 ? 'done' : 'error')
+      if (resumed && code !== 0 && Date.now() - startedAt < RESUME_FAIL_MS) {
+        updateChat(chat.id, { sessionId: undefined })
+        t.write('\r\n\x1b[33m[não deu para retomar a conversa anterior — Enter abre uma nova]\x1b[0m\r\n')
+        return
+      }
       t.write(`\r\n\x1b[2m[${label} encerrado (${code}) — Enter para reabrir]\x1b[0m\r\n`)
     }
 
@@ -127,9 +149,11 @@
       stopped = false
       t.write(`\x1b[2miniciando ${label}…\x1b[0m\r\n`)
       spawnArgs()
-        .then(({ program, args }) =>
-          invoke<number>('pty_spawn', { program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit }),
-        )
+        .then(({ program, args, resumed: isResume }) => {
+          resumed = isResume
+          startedAt = Date.now()
+          return invoke<number>('pty_spawn', { chat: chat.id, program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit })
+        })
         .then((pty) => {
           id = pty
           setStatus(chat.id, 'idle')
@@ -143,6 +167,7 @@
     start()
 
     t.onData((data) => {
+      if (!automated) noteHumanInput()
       if (id !== undefined) write(data)
       else if (stopped && data === '\r') {
         t.reset()
@@ -151,11 +176,26 @@
     })
     t.onResize(({ cols, rows }) => id !== undefined && invoke('pty_resize', { id, cols, rows }))
 
+    const pasteAutomated = (text: string) => {
+      automated = true
+      try {
+        t.paste(text)
+      } finally {
+        automated = false
+      }
+    }
     terminals.set(chat.id, {
       paste: (text) => t.paste(text),
       submit: (text) => {
-        t.paste(text)
+        pasteAutomated(text)
         setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
+      },
+      read: (lines) => {
+        const buffer = t.buffer.active
+        const start = Math.max(0, buffer.length - lines)
+        const out: string[] = []
+        for (let i = start; i < buffer.length; i++) out.push(buffer.getLine(i)?.translateToString(true) ?? '')
+        return out.join('\n').trimEnd()
       },
     })
 

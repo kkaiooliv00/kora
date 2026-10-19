@@ -19,6 +19,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            api::cli_reply,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

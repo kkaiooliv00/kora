@@ -4,6 +4,8 @@ export interface TerminalHandle {
   paste(text: string): void
   /** Cola e envia (Enter). */
   submit(text: string): void
+  /** Últimas `lines` linhas da tela, em texto puro. */
+  read(lines: number): string
 }
 
 /** Terminais montados, por id do chat. Cada Terminal.svelte se registra ao montar. */

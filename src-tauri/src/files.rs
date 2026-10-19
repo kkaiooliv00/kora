@@ -62,7 +62,7 @@ pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String) -> Result<
     let curl = if cfg!(windows) { "curl.exe" } else { "curl" };
     let hook = |state: &str| {
         let url = format!("http://127.0.0.1:{}/status/{chat}/{state}?t={}", api.port, api.token);
-        json!([{ "matcher": "", "hooks": [{ "type": "command", "command": format!("{curl} -s -m 2 -X POST \"{url}\"") }] }])
+        json!([{ "matcher": "", "hooks": [{ "type": "command", "command": format!("{curl} -s -m 2 -X POST --data-binary @- \"{url}\"") }] }])
     };
     let settings = json!({
         "hooks": {

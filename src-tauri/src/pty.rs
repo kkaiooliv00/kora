@@ -10,6 +10,7 @@ use std::{
     },
     thread,
 };
+use crate::api::{is_valid_id, Api};
 use tauri::{
     ipc::{Channel, InvokeResponseBody},
     State,
@@ -94,9 +95,27 @@ fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, Strin
     Ok(cmd)
 }
 
+/// Variáveis que o `kora-cli` usa, e a pasta do Kora (onde ele está instalado) no PATH.
+fn kora_env(builder: &mut CommandBuilder, api: &Api, chat: Option<&str>) {
+    builder.env("KORA_PORT", api.port.to_string());
+    builder.env("KORA_TOKEN", &api.token);
+    if let Some(chat) = chat.filter(|c| is_valid_id(c)) {
+        builder.env("KORA_CHAT_ID", chat);
+    }
+    let Some(app_dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) else {
+        return;
+    };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if let Ok(joined) = std::env::join_paths(std::iter::once(app_dir).chain(std::env::split_paths(&path))) {
+        builder.env("PATH", joined);
+    }
+}
+
 #[tauri::command]
 pub fn pty_spawn(
     state: State<Ptys>,
+    api: State<Api>,
+    chat: Option<String>,
     program: Option<String>,
     args: Option<Vec<String>>,
     cwd: Option<String>,
@@ -118,6 +137,7 @@ pub fn pty_spawn(
     }
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
+    kora_env(&mut builder, &api, chat.as_deref());
 
     let mut child = pair.slave.spawn_command(builder).map_err(|e| e.to_string())?;
     drop(pair.slave);

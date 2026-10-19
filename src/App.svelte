@@ -13,6 +13,7 @@
     app,
     load,
     save,
+    savedState,
     fail,
     chatById,
     focusChat,
@@ -25,7 +26,8 @@
     type Chat,
     type Tab,
   } from './lib/state.svelte'
-  import { onHookStatus } from './lib/automation'
+  import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents } from './lib/automation'
+  import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS } from './lib/commands'
   import { comboOf, normalizeCombo } from './lib/keys'
   import { themeOf } from './lib/themes'
@@ -48,20 +50,23 @@
 
   onMount(() => {
     load().then((ok) => (loaded = ok))
-    const unlisten = listen<{ chat: string; state: Status }>('chat-status', ({ payload }) =>
-      onHookStatus(payload.chat, payload.state),
-    )
+    const listeners = [
+      listen<{ chat: string; state: Status; session: string | null }>('chat-status', ({ payload }) =>
+        onHookStatus(payload.chat, payload.state, payload.session),
+      ),
+      listen<CliRequest>('kora-cli', ({ payload }) => handleCli(payload)),
+    ]
     window.addEventListener('keydown', onKey, true)
     return () => {
       window.removeEventListener('keydown', onKey, true)
-      unlisten.then((stop) => stop())
+      listeners.forEach((unlisten) => unlisten.then((stop) => stop()))
     }
   })
 
   $effect(() => {
     if (!loaded) return
     const config = $state.snapshot({ profiles: app.profiles, settings: app.settings })
-    const state = $state.snapshot({ projects: app.projects, groups: app.groups, chats: app.chats })
+    const state = $state.snapshot(savedState())
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => save(config, state), SAVE_DELAY_MS)
   })
@@ -164,6 +169,16 @@
   {#if app.modal === 'broadcast'}<Broadcast />{/if}
   {#if app.modal === 'queue'}<Queue />{/if}
   {#if app.modal === 'diff'}<Diff />{/if}
+
+  {#if app.agentsPaused}
+    <div class="paused" role="alert">
+      <span>
+        Agentes pausados: {AGENT_MESSAGE_LIMIT} mensagens entre eles sem você interagir. As próximas mensagens do
+        <code>kora-cli</code> são recusadas até você liberar.
+      </span>
+      <button class="btn primary" onclick={resumeAgents}>Liberar</button>
+    </div>
+  {/if}
 
   {#if app.error}
     <div class="toast" role="alert">
@@ -341,6 +356,22 @@
     padding: 12px 14px;
     border-left: 3px solid #e5484d;
     border-radius: 8px;
+    background: var(--panel);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+    z-index: 20;
+  }
+  .paused {
+    position: fixed;
+    left: 50%;
+    top: 12px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    max-width: min(640px, calc(100vw - 32px));
+    padding: 10px 12px 10px 16px;
+    border: 1px solid #f2b84b;
+    border-radius: 10px;
     background: var(--panel);
     box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
     z-index: 20;

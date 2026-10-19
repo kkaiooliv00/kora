@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
-import { app, chatById, chatDir, fail, isOpen, projectOf, type Snippet, type Status } from './state.svelte'
+import { app, chatById, chatDir, fail, isOpen, projectOf, updateChat, type Snippet, type Status } from './state.svelte'
 import { terminals } from './terminals'
 import { splitCommand } from './command'
 
@@ -61,7 +61,7 @@ export function openActiveInEditor() {
   openInEditor(chat ? chatDir(chat) : app.projects[0]?.path)
 }
 
-async function notify(title: string, body: string) {
+export async function notify(title: string, body: string) {
   try {
     const granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
     if (granted) sendNotification({ title, body })
@@ -71,13 +71,37 @@ async function notify(title: string, body: string) {
 }
 
 /** Status vindo dos hooks do Claude Code; notifica se o chat não está à vista. */
-export function onHookStatus(id: string, status: Status) {
+export function onHookStatus(id: string, status: Status, session: string | null) {
   if (!isOpen(id)) return
   const previous = app.status[id]
   setStatus(id, status)
   const chat = chatById(id)
+  if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
   const unseen = !document.hasFocus() || app.active !== id
   if (!chat || !unseen) return
   if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')
   else if (status === 'idle' && previous === 'running') notify(chat.name, 'Terminou')
+}
+
+/** Mensagens entre agentes sem você digitar nada; acima disso o Kora pausa as entregas. */
+export const AGENT_MESSAGE_LIMIT = 20
+
+/** Você digitou num terminal: o contador anti-loop zera. */
+export function noteHumanInput() {
+  if (app.agentMessages > 0) app.agentMessages = 0
+}
+
+export function resumeAgents() {
+  app.agentMessages = 0
+  app.agentsPaused = false
+}
+
+/** Conta uma mensagem entre agentes; false = limite atingido (entregas pausadas). */
+export function admitAgentMessage(): boolean {
+  if (app.agentsPaused) return false
+  app.agentMessages += 1
+  if (app.agentMessages <= AGENT_MESSAGE_LIMIT) return true
+  app.agentsPaused = true
+  notify('Kora', `Agentes pausados: ${AGENT_MESSAGE_LIMIT} mensagens entre eles sem você interagir.`)
+  return false
 }

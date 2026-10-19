@@ -38,7 +38,7 @@ Perfis ficam em config — adicionar uma IA nova não exige código. SSH (K) é 
 │  PtyManager  ─ spawn/kill/write/resize    │
 │  StatusEngine ─ hooks + heurística        │
 │  Store ─ config.json / state.json         │
-│  LocalApi ─ HTTP 127.0.0.1:<porta>+token  │◀── `kora` CLI (hooks e chat↔chat)
+│  LocalApi ─ HTTP 127.0.0.1:<porta>+token  │◀── `kora-cli` (hooks e chat↔chat)
 └───────────────────────────────────────────┘
 ```
 
@@ -48,24 +48,24 @@ Cada PTY recebe no ambiente `KORA_CHAT_ID`, `KORA_PORT`, `KORA_TOKEN`.
 
 Estados: `rodando` · `aguardando você` · `ocioso` · `finalizado` · `erro`.
 
-- **Claude Code** (preciso): o app inicia `claude --settings <arquivo gerado>` com hooks que chamam `kora status <estado>`
+- **Claude Code** (preciso): o app inicia `claude --settings <arquivo gerado>` com hooks que fazem `curl` na API local (status + session_id do Claude)
   - `UserPromptSubmit`, `PreToolUse` → rodando
   - `Notification` → aguardando você (permissão / idle)
   - `Stop` → ocioso (turno terminou); grava `session_id` para resume
   - Não toca no `~/.claude/settings.json` do usuário.
-- **Codex**: `notify` do config → `kora status`.
+- **Codex**: heurística por enquanto (o `notify` do config pode virar hook depois).
 - **Demais CLIs** (heurística): saída nos últimos ~2s → rodando; sem saída → ocioso.
 - **Processo saiu**: código 0 → finalizado, ≠0 → erro.
 
 ### Chats conversando (item 2)
 
-Binário `kora` (mesmo workspace Rust) fala com o `LocalApi`:
+Binário `kora-cli` (crate `cli/`, só std, instalado junto como sidecar) fala com o `LocalApi`:
 
 ```
-kora list                       # chats do grupo/projeto
-kora send <chat> "mensagem"     # escreve no PTY do outro chat
-kora read <chat> [--lines 200]  # lê o fim do scrollback
-kora wait <chat>                # bloqueia até o chat ficar ocioso
+kora-cli list                       # chats do grupo/projeto
+kora-cli send <chat> "mensagem"     # escreve no PTY do outro chat
+kora-cli read <chat> [--lines 200]  # lê o fim do scrollback
+kora-cli wait <chat>                # bloqueia até o chat ficar ocioso
 ```
 
 Qualquer agente consegue usar, porque todos sabem rodar comando de shell. Um MCP server em cima disso só se a CLI não bastar.
@@ -75,7 +75,7 @@ Qualquer agente consegue usar, porque todos sabem rodar comando de shell. Um MCP
 | # | Funcionalidade | Como |
 |---|---|---|
 | 1 | Várias IAs | perfis em config |
-| 2 | Grupos + conversa | árvore na sidebar + `kora` CLI |
+| 2 | Grupos + conversa | árvore na sidebar + `kora-cli` |
 | 3 | Status | StatusEngine (acima) |
 | 4 | Projetos | pasta raiz; chat nasce com cwd do projeto |
 | 5 | Visual | tema/fonte/cursor/opacidade em config, hot reload; import de temas do Windows Terminal |
@@ -103,7 +103,7 @@ Qualquer agente consegue usar, porque todos sabem rodar comando de shell. Um MCP
 | 1 ✅ | **MVP**: projetos, perfis, árvore projeto→grupo→chat, abas, status, temas, notificações, links | 1, 3, 4, 5, C, O |
 | 2 ✅ | Produtividade + bandeja | E, F, G, I, B, M, N, L, C |
 | 3 ✅ | Git | A, H |
-| 4 | Persistência + comunicação | D, 2 (`kora` CLI) |
+| 4 ✅ | Persistência + comunicação | D, 2 (`kora-cli`) |
 | 5 | Extras | J, K (reconexão) |
 
 Cada fase termina com o app rodando no Windows; o build no Linux é validado via CI (GitHub Actions, `ubuntu-latest`) a partir da fase 1.
@@ -112,7 +112,7 @@ Cada fase termina com o app rodando no Windows; o build no Linux é validado via
 
 - Layout: sidebar em árvore (como o Orca) + abas + splits.
 - Linux: desktop com GUI; servidor remoto via perfil SSH (K).
-- Chat↔chat: delegação via `kora send/read/wait`.
+- Chat↔chat: delegação via `kora-cli send/read/wait`.
 
 ## Pré-requisitos (Windows)
 

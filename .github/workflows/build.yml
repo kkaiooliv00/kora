@@ -40,13 +40,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            cli
+
+      # kora-cli vai junto no instalador como sidecar (tauri externalBin exige o sufixo do target).
+      - name: kora-cli
+        shell: bash
+        run: |
+          cargo build --release --manifest-path cli/Cargo.toml
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=$([ "$RUNNER_OS" = "Windows" ] && echo .exe || true)
+          mkdir -p src-tauri/binaries
+          cp "cli/target/release/kora-cli$ext" "src-tauri/binaries/kora-cli-$triple$ext"
 
       - run: npm ci
       - run: npm run check
       - name: Testes Rust
         if: runner.os == 'Linux'
-        run: npm run build && cargo test --manifest-path src-tauri/Cargo.toml
+        run: |
+          cargo test --manifest-path cli/Cargo.toml
+          npm run build && cargo test --manifest-path src-tauri/Cargo.toml
       - run: npx tauri build --bundles ${{ matrix.bundles }}
 
       - uses: actions/upload-artifact@v4

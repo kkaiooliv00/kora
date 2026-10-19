@@ -1,3 +1,4 @@
+import { tick } from 'svelte'
 import { invoke } from '@tauri-apps/api/core'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
@@ -32,6 +33,8 @@ export interface Chat {
   /** Pasta do git worktree próprio (vazio = pasta do projeto). */
   cwd?: string
   branch?: string
+  /** Sessão do Claude, para retomar a conversa ao reabrir. */
+  sessionId?: string
 }
 export interface Snippet {
   name: string
@@ -83,7 +86,17 @@ const DEFAULT_SETTINGS: Settings = {
   browser: '',
   editor: 'code',
   keys: DEFAULT_KEYS,
-  snippets: [{ name: 'Revisar mudanças', text: 'Revise as mudanças não commitadas e aponte bugs e riscos.' }],
+  snippets: [
+    { name: 'Revisar mudanças', text: 'Revise as mudanças não commitadas e aponte bugs e riscos.' },
+    {
+      name: 'Kora: conversar com outros chats',
+      text:
+        'Você está dentro do Kora. Para falar com outros chats de IA abertos nele, use no terminal: ' +
+        '`kora-cli list` (lista os chats), `kora-cli send <chat> <mensagem>` (envia um prompt), ' +
+        '`kora-cli wait <chat>` (espera terminar) e `kora-cli read <chat> [linhas]` (lê a tela). ' +
+        'Mensagens de outros chats chegam como [mensagem de <chat>].',
+    },
+  ],
 }
 
 export const app = $state({
@@ -104,6 +117,9 @@ export const app = $state({
   paletteOpens: 0,
   /** Chat com a barra de busca aberta. */
   searching: null as string | null,
+  /** Mensagens entre agentes desde a última vez que você digitou; pausa no limite. */
+  agentMessages: 0,
+  agentsPaused: false,
   error: '',
 })
 
@@ -121,7 +137,7 @@ export async function load(): Promise<boolean> {
   try {
     const [config, state] = await Promise.all([
       invoke<Partial<{ profiles: Profile[]; settings: Partial<Settings> }> | null>('load_json', { name: 'config' }),
-      invoke<Partial<{ projects: Project[]; groups: Group[]; chats: Chat[] }> | null>('load_json', { name: 'state' }),
+      invoke<Partial<SavedState> | null>('load_json', { name: 'state' }),
     ])
     const profiles = config?.profiles ?? DEFAULT_PROFILES
     // v0.1.0 salvou o perfil "gemini"; o comando certo é o agy.
@@ -135,11 +151,40 @@ export async function load(): Promise<boolean> {
     app.projects = state?.projects ?? []
     app.groups = state?.groups ?? []
     app.chats = (state?.chats ?? []).map((c) => (legacyGemini && c.profileId === 'gemini' ? { ...c, profileId: 'agy' } : c))
+    restoreTabs(state ?? {})
     return true
   } catch (e) {
     fail('Configuração não carregada (nada será salvo até corrigir)', e)
     return false
   }
+}
+
+/** O que vai para state.json: árvore + abas abertas (reabertas na próxima vez). */
+export interface SavedState {
+  projects: Project[]
+  groups: Group[]
+  chats: Chat[]
+  tabs: Tab[]
+  activeTab: string | null
+  active: string | null
+}
+
+export const savedState = (): SavedState => ({
+  projects: app.projects,
+  groups: app.groups,
+  chats: app.chats,
+  tabs: app.tabs,
+  activeTab: app.activeTab,
+  active: app.active,
+})
+
+function restoreTabs(state: Partial<SavedState>) {
+  const known = new Set(app.chats.map((c) => c.id))
+  app.tabs = (state.tabs ?? [])
+    .map((t) => ({ ...t, panes: t.panes.filter((id) => known.has(id)) }))
+    .filter((t) => t.panes.length > 0)
+  const active = state.active && known.has(state.active) ? state.active : app.tabs[0]?.panes[0]
+  if (active) focusChat(active)
 }
 
 export function save(config: unknown, state: unknown) {
@@ -226,6 +271,18 @@ export async function removeChat(id: string) {
 }
 
 export const chatDir = (chat: Chat) => chat.cwd ?? projectOf(chat)?.path
+
+export function updateChat(id: string, patch: Partial<Chat>) {
+  app.chats = app.chats.map((c) => (c.id === id ? { ...c, ...patch } : c))
+}
+
+/** Fecha e reabre o terminal do chat; `fresh` esquece a sessão (conversa nova). */
+export async function restartChat(id: string, fresh: boolean) {
+  if (fresh) updateChat(id, { sessionId: undefined })
+  closePane(id)
+  await tick()
+  openChat(id)
+}
 
 // ---- abas e painéis ----
 

@@ -6,10 +6,11 @@ import {
   cycleTab,
   openChat,
   projectOf,
+  restartChat,
   splitChat,
   toggleDirection,
 } from './state.svelte'
-import { activeSnippets, openActiveInEditor, openInEditor, pasteSnippet } from './automation'
+import { activeSnippets, openActiveInEditor, openInEditor, pasteSnippet, resumeAgents } from './automation'
 
 export interface Command {
   id: string
@@ -46,8 +47,16 @@ export function buildCommands(): Command[] {
   const actions = Object.entries(ACTIONS)
     .filter(([id]) => id !== 'palette')
     .map(([id, a]) => ({ id, label: a.label, hint: app.settings.keys[id], run: a.run }))
+  const active = app.active
   const extras: Command[] = [
     { id: 'newProject', label: 'Novo projeto', run: addProject },
+    ...(active
+      ? [
+          { id: 'restart', label: 'Reiniciar chat em foco (retoma a conversa)', run: () => restartChat(active, false) },
+          { id: 'fresh', label: 'Nova conversa no chat em foco', run: () => restartChat(active, true) },
+        ]
+      : []),
+    ...(app.agentsPaused ? [{ id: 'resumeAgents', label: 'Liberar mensagens entre agentes', run: resumeAgents }] : []),
     { id: 'toggleSplit', label: 'Alternar divisão lado a lado / empilhada', run: toggleDirection },
   ]
   const snippets = activeSnippets().map((s, i) => ({ id: `snippet:${i}`, label: `Snippet: ${s.name}`, run: () => pasteSnippet(s.text) }))
