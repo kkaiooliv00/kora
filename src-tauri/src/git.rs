@@ -11,7 +11,8 @@ pub(crate) fn git(dir: &str, args: &[&str]) -> Result<String, String> {
 /// `git` com variáveis de ambiente extras (ex.: `GIT_INDEX_FILE` do ponto de restauração).
 pub(crate) fn git_env(dir: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(dir).args(args).envs(envs.iter().copied());
+    // Sem prompt de senha: um push sem credencial falha na hora em vez de travar o worker.
+    cmd.arg("-C").arg(dir).args(args).env("GIT_TERMINAL_PROMPT", "0").envs(envs.iter().copied());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -19,7 +20,9 @@ pub(crate) fn git_env(dir: &str, args: &[&str], envs: &[(&str, &str)]) -> Result
     }
     let out = cmd.output().map_err(|e| format!("git não encontrado: {e}"))?;
     if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        // Alguns erros (ex.: "nothing to commit") saem no stdout.
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err });
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -139,6 +142,9 @@ pub async fn git_merge(project: String, branch: String) -> Result<String, String
         return Err("a pasta do projeto tem mudanças não commitadas; faça commit ou stash antes de mesclar".into());
     }
     git(&project, &["merge", "--no-ff", "--no-edit", branch]).map_err(|e| {
+        if !e.contains("CONFLICT") {
+            return e;
+        }
         let _ = git(&project, &["merge", "--abort"]);
         format!("conflito ao mesclar; nada foi alterado.\n{e}")
     })

@@ -23,20 +23,26 @@
     timer = setTimeout(run, DEBOUNCE_MS)
   }
 
+  /** Só a busca mais recente aplica o resultado (uma antiga e lenta não sobrescreve). */
+  let seq = 0
+
   async function run() {
+    const mine = ++seq
     const text = query.trim()
     if (text.length < 2) {
       hits = []
+      loading = false
       return
     }
     loading = true
     error = ''
     try {
-      hits = await invoke<Hit[]>('search_history', { query: text, sessions: [...bySession.keys()] })
+      const found = await invoke<Hit[]>('search_history', { query: text, sessions: [...bySession.keys()] })
+      if (mine === seq) hits = found
     } catch (e) {
-      error = String(e)
+      if (mine === seq) error = String(e)
     } finally {
-      loading = false
+      if (mine === seq) loading = false
     }
   }
 

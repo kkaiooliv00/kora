@@ -4,6 +4,7 @@
   import { app, type Profile, type Snippet } from './lib/state.svelte'
   import { ACTIONS } from './lib/commands'
   import { THEMES, themeOf } from './lib/themes'
+  import { checkBudget } from './lib/budget'
   import { CATEGORIES, DEFAULT_PERMISSIONS, type Permissions, type Policy } from './lib/permissions'
 
   const SECTIONS = [
@@ -97,6 +98,8 @@
       },
     }
     app.modal = null
+    // Limite novo vale já, não só na próxima leitura (a cada 5 min).
+    checkBudget()
   }
 </script>
 

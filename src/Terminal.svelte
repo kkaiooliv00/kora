@@ -153,11 +153,23 @@
     const write = (data: string) => id !== undefined && invoke('pty_write', { id, data })
 
     // Primeiro prompt (boas-vindas): sai quando a saída do agente sossega, sinal de que a TUI abriu.
+    // Marcador em cada prompt enviado: navegar entre prompts e copiar só a última resposta.
+    const prompts: IMarker[] = []
+    const markPrompt = () => {
+      const marker = t.registerMarker(0)
+      if (!marker) return
+      prompts.push(marker)
+      marker.onDispose(() => prompts.splice(prompts.indexOf(marker), 1))
+    }
+    /** Você digitou ou colou algo desde o último Enter (Enter de aprovar/menu não é prompt). */
+    let typed = false
+
     let promptTimer: ReturnType<typeof setTimeout> | undefined
     const sendPendingPrompt = () => {
       const text = app.pendingPrompt[chat.id]
       if (!text) return
       delete app.pendingPrompt[chat.id]
+      markPrompt()
       t.paste(text)
       setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
     }
@@ -244,20 +256,16 @@
     }
     start()
 
-    // Marcador em cada prompt enviado: navegar entre prompts e copiar só a última resposta.
-    const prompts: IMarker[] = []
-    const markPrompt = () => {
-      const marker = t.registerMarker(0)
-      if (!marker) return
-      prompts.push(marker)
-      marker.onDispose(() => prompts.splice(prompts.indexOf(marker), 1))
-    }
-
     // Só tecla de verdade conta como você (onData também traz respostas automáticas do terminal).
     t.onKey(({ domEvent }) => {
       noteHumanInput()
       clearPermission(chat.id)
-      if (domEvent.key === 'Enter' && !domEvent.shiftKey) markPrompt()
+      if (domEvent.key === 'Enter' && !domEvent.shiftKey) {
+        if (typed) markPrompt()
+        typed = false
+      } else if (domEvent.key.length === 1 && !domEvent.ctrlKey && !domEvent.altKey) {
+        typed = true
+      }
     })
     t.onData((data) => {
       if (id !== undefined) write(data)
@@ -308,8 +316,10 @@
     })
 
     const onPaste = pasteImage(t)
+    const onTypedPaste = () => (typed = true)
     const onFocus = () => app.active !== chat.id && focusChat(chat.id)
     el.addEventListener('paste', onPaste, true)
+    el.addEventListener('paste', onTypedPaste)
     el.addEventListener('focusin', onFocus)
     const ro = new ResizeObserver(() => el.offsetParent && fit.fit())
     ro.observe(el)
@@ -320,6 +330,7 @@
       clearTimeout(promptTimer)
       ro.disconnect()
       el.removeEventListener('paste', onPaste, true)
+      el.removeEventListener('paste', onTypedPaste)
       el.removeEventListener('focusin', onFocus)
       terminals.delete(chat.id)
       clearTimeout(idleTimer)

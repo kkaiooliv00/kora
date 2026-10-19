@@ -15,10 +15,10 @@ export function watchStats(): () => void {
       const id = handle.pty()
       if (id !== undefined) byPty.set(id, chat)
     }
+    for (const key of Object.keys(procStats)) if (!terminals.has(key)) delete procStats[key]
     if (byPty.size === 0) return
     try {
       const result = await invoke<Record<string, { cpu: number; memory: number }>>('pty_stats', { ids: [...byPty.keys()] })
-      for (const key of Object.keys(procStats)) if (!terminals.has(key)) delete procStats[key]
       for (const [pty, usage] of Object.entries(result)) {
         const chat = byPty.get(Number(pty))
         if (chat) procStats[chat] = usage

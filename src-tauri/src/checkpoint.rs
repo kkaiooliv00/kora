@@ -8,6 +8,7 @@ use serde::Serialize;
 use std::{
     fs,
     path::Path,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -40,9 +41,19 @@ fn checkpoint_time(reference: &str, chat: &str) -> Option<u64> {
     stamp.chars().all(|c| c.is_ascii_digit()).then(|| stamp.parse().ok()).flatten()
 }
 
-/// Commit com o estado atual da pasta. Usa uma cópia do índice (mantém o cache de stat: rápido em repositório grande).
+/// Raiz do repositório: o ponto sempre cobre o repositório inteiro, mesmo que o chat (ou o hook) esteja numa subpasta.
+fn toplevel(dir: &str) -> Result<String, String> {
+    git(dir, &["rev-parse", "--show-toplevel"]).map(|t| t.trim().to_string())
+}
+
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Commit com o estado atual do repositório. Usa uma cópia do índice (mantém o cache de stat: rápido em repositório grande).
 fn snapshot(dir: &str, label: &str) -> Result<String, String> {
-    let temp = std::env::temp_dir().join(format!("kora-index-{}-{}", std::process::id(), now_ms()));
+    let dir = toplevel(dir)?;
+    let dir = dir.as_str();
+    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let temp = std::env::temp_dir().join(format!("kora-index-{}-{}-{seq}", std::process::id(), now_ms()));
     let temp_str = temp.to_string_lossy().into_owned();
     let head = git(dir, &["rev-parse", "--verify", "-q", "HEAD"]).ok().map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
     let result = (|| {
@@ -53,7 +64,7 @@ fn snapshot(dir: &str, label: &str) -> Result<String, String> {
                 git_env(dir, &["read-tree", head], &env)?;
             }
         }
-        git_env(dir, &["add", "-A", "--", "."], &env)?;
+        git_env(dir, &["add", "-A"], &env)?;
         let tree = git_env(dir, &["write-tree"], &env)?;
         let mut args = vec!["commit-tree", tree.trim(), "-m", label];
         if let Some(head) = &head {
@@ -114,13 +125,15 @@ pub async fn restore_checkpoint(dir: String, chat: String, reference: String) ->
         return Err("ponto de restauração inválido".into());
     }
     create(&dir, &chat, "antes de restaurar")?;
-    let current = snapshot(&dir, "kora: estado atual")?;
+    let top = toplevel(&dir)?;
+    let current = snapshot(&top, "kora: estado atual")?;
     // Arquivos que não existiam no ponto: o restore não remove o que não é rastreado.
-    let added = git(&dir, &["diff", "--name-only", "--relative", "--diff-filter=A", "-z", &reference, &current])?;
+    // --no-renames: um arquivo renomeado depois do ponto aparece como novo (e é removido).
+    let added = git(&top, &["diff", "--name-only", "--no-renames", "--diff-filter=A", "-z", &reference, &current])?;
     for file in added.split('\0').filter(|f| !f.is_empty()) {
-        let _ = fs::remove_file(Path::new(&dir).join(file));
+        let _ = fs::remove_file(Path::new(&top).join(file));
     }
-    git(&dir, &["restore", &format!("--source={reference}"), "--worktree", "--", "."]).map(|_| ())
+    git(&top, &["restore", &format!("--source={reference}"), "--worktree", "--", "."]).map(|_| ())
 }
 
 #[cfg(test)]

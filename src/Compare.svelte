@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
+  import { ask } from '@tauri-apps/plugin-dialog'
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import { app, chatById, chatDir, fail, openChat, projectOf, removeChat, STATUS, type Chat } from './lib/state.svelte'
   import { parseDiff } from './lib/diff'
@@ -40,8 +42,9 @@
     }
   }
 
+  // Só quando o grupo muda (renomear ou o lastActive de um chat não refaz os diffs).
   $effect(() => {
-    if (group) refresh()
+    if (group?.id) untrack(refresh)
   })
 
   async function start(e: SubmitEvent) {
@@ -57,8 +60,11 @@
     const project = projectOf(chat)
     const dir = chatDir(chat)
     if (!project || !dir || !chat.branch || !group) return
+    if (app.status[chat.id] === 'running' && !(await ask(`${chat.name} ainda está trabalhando. Mesclar o que existe agora?`, { title: 'Ficar com este', kind: 'warning' }))) return
     busy = chat.id
     try {
+      // Diff atualizado: o agente pode ter mudado arquivos depois do último "Atualizar".
+      await refresh()
       if ((summaries[chat.id]?.files ?? 0) > 0) await invoke('git_commit', { dir, message: `kora: ${group.compare ?? group.name}` })
       await invoke('git_merge', { project: project.path, branch: chat.branch })
       const others = chats.filter((c) => c.id !== chat.id)

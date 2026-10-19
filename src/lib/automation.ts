@@ -39,7 +39,8 @@ export function activeSnippets(): Snippet[] {
 }
 
 /** Campos `{nome}` de um snippet, na ordem em que aparecem, sem repetir. */
-const FIELD = /\{([^{}\n]{1,40})\}/g
+// Só nomes (letras, números, _, espaço, -): `{ return 1 }` e JSON não viram campo.
+const FIELD = /\{([\p{L}_][\p{L}\p{N}_ -]{0,39})\}/gu
 
 export function templateFields(text: string): string[] {
   return [...new Set([...text.matchAll(FIELD)].map((m) => m[1].trim()))].filter(Boolean)
@@ -92,7 +93,6 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   updateAgentInfo(id, status, detail)
   if (!chat) return
   if (detail?.file) noteTouched(chat, detail.file)
-  if (detail?.checkpoint) app.checkpointRev[id] = (app.checkpointRev[id] ?? 0) + 1
   const finished = status === 'idle' && previous === 'running'
   // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
   if (!document.hasFocus()) {

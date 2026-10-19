@@ -7,7 +7,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     io::{BufRead, BufReader},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 use tauri::{AppHandle, Manager};
 
@@ -58,7 +58,7 @@ fn snippet(text: &str, query_lower: &str) -> Option<String> {
     Some(format!("{}{body}{}", if start > 0 { "…" } else { "" }, if end < chars.len() { "…" } else { "" }))
 }
 
-fn session_files(root: &PathBuf, sessions: &HashSet<String>) -> Vec<(String, PathBuf)> {
+fn session_files(root: &Path, sessions: &HashSet<String>) -> Vec<(String, PathBuf)> {
     let Ok(projects) = fs::read_dir(root) else { return Vec::new() };
     projects
         .flatten()
@@ -72,7 +72,7 @@ fn session_files(root: &PathBuf, sessions: &HashSet<String>) -> Vec<(String, Pat
         .collect()
 }
 
-fn search(root: &PathBuf, query: &str, sessions: &HashSet<String>) -> Vec<Hit> {
+fn search(root: &Path, query: &str, sessions: &HashSet<String>) -> Vec<Hit> {
     let query_lower = query.to_lowercase();
     let mut hits = Vec::new();
     for (session, path) in session_files(root, sessions) {

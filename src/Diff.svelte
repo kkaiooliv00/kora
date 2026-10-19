@@ -26,7 +26,7 @@
   let message = $state('')
   let busy = $state('')
   let mainBranch = $state<string | null>(null)
-  if (project && worktreeBranch) invoke<string | null>('git_branch', { dir: project.path }).then((b) => (mainBranch = b))
+  if (project && worktreeBranch) invoke<string | null>('git_branch', { dir: project.path }).then((b) => (mainBranch = b)).catch(() => (mainBranch = null))
 
   async function act(label: string, run: () => Promise<void>) {
     busy = label

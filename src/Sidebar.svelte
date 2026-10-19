@@ -145,7 +145,9 @@
       { label: 'Renomear', shortcut: 'F2', run: () => (renaming = chat.id) },
       { label: 'Duplicar chat', run: () => addChat(chat.projectId, chat.profileId, chat.groupId) },
       { label: 'Exportar conversa…', run: () => exportChat(chat.id) },
-      { label: 'Arquivar', run: () => archiveChat(chat.id, true) },
+      chat.archived
+        ? { label: 'Desarquivar', run: () => archiveChat(chat.id, false) }
+        : { label: 'Arquivar', run: () => archiveChat(chat.id, true) },
       { separator: true },
       { label: 'Encerrar chat', disabled: !isOpen(chat.id), run: () => closePane(chat.id) },
       { label: 'Remover chat', danger: true, run: () => removeChat(chat.id) },

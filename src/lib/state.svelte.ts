@@ -370,14 +370,20 @@ export async function runProject(sourceId: string) {
   const source = chatById(sourceId)
   const project = source && projectOf(source)
   const shell = app.profiles.find((p) => !p.command.trim())
-  if (!source || !project || !shell) return
+  if (!source || !project) return
+  if (!shell) return fail('Rodar projeto', 'crie um perfil de shell (command vazio) em Configurações → Agentes')
   if (!project.runCommand?.trim()) {
     app.editingProject = project.id
     app.modal = 'project'
     return
   }
+  openChat(source.id)
   const existing = app.chats.find((c) => c.runOf === source.id)
-  if (existing) return splitChat(existing.id)
+  if (existing) {
+    // Fechado: o shell reabre vazio, então roda o comando de novo.
+    if (!isOpen(existing.id)) app.pendingPrompt[existing.id] = project.runCommand.replaceAll('{port}', String(await invoke<number>('free_port')))
+    return splitChat(existing.id)
+  }
   try {
     const port = await invoke<number>('free_port')
     const chat: Chat = {
@@ -392,7 +398,6 @@ export async function runProject(sourceId: string) {
     }
     app.chats.push(chat)
     app.pendingPrompt[chat.id] = project.runCommand.replaceAll('{port}', String(port))
-    focusChat(source.id)
     splitChat(chat.id)
   } catch (e) {
     fail('Não foi possível rodar o projeto', e)
@@ -425,8 +430,12 @@ export async function addChat(projectId: string, profileId: string, groupId?: st
   return chat.id
 }
 
-/** Arquivar fecha o painel; desarquivar só devolve o chat à barra lateral. */
-export function archiveChat(id: string, archived: boolean) {
+/** Arquivar fecha o painel (encerra o processo); desarquivar só devolve o chat à barra lateral. */
+export async function archiveChat(id: string, archived: boolean) {
+  if (archived && app.status[id] === 'running') {
+    const ok = await ask('O agente está trabalhando. Arquivar encerra o processo agora.', { title: 'Arquivar chat', kind: 'warning' })
+    if (!ok) return
+  }
   if (archived) closePane(id)
   updateChat(id, { archived })
 }
@@ -444,7 +453,9 @@ export async function removeChat(id: string) {
   const chat = chatById(id)
   if (!chat) return
   closePane(id)
-  app.chats = app.chats.filter((c) => c.id !== id)
+  // O shell de "rodar" deste chat usa a mesma pasta: sai junto.
+  for (const run of app.chats.filter((c) => c.runOf === id)) closePane(run.id)
+  app.chats = app.chats.filter((c) => c.id !== id && c.runOf !== id)
   // O shell de "rodar" usa a pasta do chat, mas o worktree não é dele.
   if (!chat.cwd || chat.runOf) return
   const remove = await ask(`Apagar também o worktree em ${chat.cwd}? A branch ${chat.branch} continua no repositório.`, {
@@ -490,20 +501,24 @@ export function focusChat(id: string) {
   app.active = id
 }
 
+/** Abrir um chat arquivado (pela paleta, recentes, quadro…) o tira do arquivo. */
 export function openChat(id: string) {
   if (!isOpen(id)) app.tabs.push({ id: uid(), panes: [id], vertical: false })
-  updateChat(id, { lastActive: Date.now() })
+  updateChat(id, { lastActive: Date.now(), archived: false })
   focusChat(id)
 }
 
+// Mudou o número de painéis: os tamanhos arrastados deixam de valer (divisão igual).
 const withoutPane = (tabs: Tab[], id: string) =>
-  tabs.map((t) => ({ ...t, panes: t.panes.filter((p) => p !== id) })).filter((t) => t.panes.length > 0)
+  tabs
+    .map((t) => (t.panes.includes(id) ? { ...t, panes: t.panes.filter((p) => p !== id), sizes: undefined } : t))
+    .filter((t) => t.panes.length > 0)
 
 /** Coloca o chat ao lado do que está em foco; se ele já estiver aberto em outra aba, move. */
 export function splitChat(id: string) {
   const target = app.tabs.find((t) => t.id === app.activeTab)
   if (!target || target.panes.includes(id)) return openChat(id)
-  app.tabs = withoutPane(app.tabs, id).map((t) => (t.id === target.id ? { ...t, panes: [...t.panes, id] } : t))
+  app.tabs = withoutPane(app.tabs, id).map((t) => (t.id === target.id ? { ...t, panes: [...t.panes, id], sizes: undefined } : t))
   focusChat(id)
 }
 

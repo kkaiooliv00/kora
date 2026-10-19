@@ -137,14 +137,14 @@ fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
     match route {
         Route::Status { chat, state } => {
             let session = session_id(&body);
-            let mut detail = crate::hooks::detail(&body);
-            // Antes de responder: o Claude espera o hook, então o ponto pega a pasta antes de qualquer edição.
-            if let Some(d) = detail.as_mut().filter(|d| d["event"] == "UserPromptSubmit") {
-                if checkpoint_before_prompt(&chat, &body) {
-                    d["checkpoint"] = Value::Bool(true);
-                }
+            let detail = crate::hooks::detail(&body);
+            let prompt = detail.as_ref().is_some_and(|d| d["event"] == "UserPromptSubmit");
+            // Status primeiro (a interface não fica esperando o git).
+            let _ = app.emit("chat-status", StatusEvent { chat: chat.clone(), state, session, detail });
+            // O Claude espera a resposta deste hook: o ponto pega a pasta antes de qualquer edição.
+            if prompt && checkpoint_before_prompt(&chat, &body) {
+                let _ = app.emit("chat-checkpoint", chat);
             }
-            let _ = app.emit("chat-status", StatusEvent { chat, state, session, detail });
             let _ = req.respond(Response::empty(204u16));
         }
         Route::Cli(kind) => {

@@ -57,7 +57,7 @@
   import { menuState } from './lib/menu.svelte'
   import { themeOf } from './lib/themes'
   import { watchStats } from './lib/stats.svelte'
-  import { watchBudget } from './lib/budget'
+  import { checkBudget, watchBudget } from './lib/budget'
   import { SIDEBAR, clampSidebar, dragDivider, paneSizes } from './lib/resize'
   import { comboOf, normalizeCombo } from './lib/keys'
 
@@ -89,12 +89,16 @@
   }
 
   onMount(() => {
-    load().then((ok) => (loaded = ok))
+    load().then((ok) => {
+      loaded = ok
+      checkBudget()
+    })
     const listeners = [
       listen<{ chat: string; state: Status; session: string | null; detail: HookDetail | null }>('chat-status', ({ payload }) =>
         onHookStatus(payload.chat, payload.state, payload.session, payload.detail),
       ),
       listen<CliRequest>('kora-cli', ({ payload }) => handleCli(payload)),
+      listen<string>('chat-checkpoint', ({ payload }) => (app.checkpointRev[payload] = (app.checkpointRev[payload] ?? 0) + 1)),
     ]
     window.addEventListener('keydown', onKey, true)
     const stopStats = watchStats()
@@ -187,25 +191,22 @@
       const sizes = dragDivider(paneSizes(current.sizes, current.panes.length), index, pct, tab.vertical ? box.height : box.width)
       app.tabs = app.tabs.map((t) => (t.id === tab.id ? { ...t, sizes } : t))
     }
-    const up = () => {
-      handle.removeEventListener('pointermove', move)
-      handle.removeEventListener('pointerup', up)
-    }
-    handle.addEventListener('pointermove', move)
-    handle.addEventListener('pointerup', up)
+    track(handle, move)
+  }
+
+  /** Liga o `move` até soltar, cancelar ou perder a captura do ponteiro. */
+  function track(handle: HTMLElement, move: (ev: PointerEvent) => void) {
+    const stop = new AbortController()
+    const end = () => stop.abort()
+    handle.addEventListener('pointermove', move, { signal: stop.signal })
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) handle.addEventListener(type, end, { signal: stop.signal })
   }
 
   function startSidebarDrag(e: PointerEvent) {
     e.preventDefault()
     const handle = e.currentTarget as HTMLElement
     handle.setPointerCapture(e.pointerId)
-    const move = (ev: PointerEvent) => (app.sidebarWidth = clampSidebar(ev.clientX))
-    const up = () => {
-      handle.removeEventListener('pointermove', move)
-      handle.removeEventListener('pointerup', up)
-    }
-    handle.addEventListener('pointermove', move)
-    handle.addEventListener('pointerup', up)
+    track(handle, (ev) => (app.sidebarWidth = clampSidebar(ev.clientX)))
   }
 
   const dividerStyle = (tab: Tab, index: number) => {

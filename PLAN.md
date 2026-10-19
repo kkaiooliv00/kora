@@ -141,3 +141,27 @@ aviso anti-loop, painel de uso (KPIs, linha hoje × ontem, top chats, tabela por
 com fila para ocupados, fila de prompts (enviado / em execução / próximo, reordenar, pausar, confirmar),
 estados vazio/carregando/erro (EmptyState, Skeleton), toasts, menu de contexto e ícone da bandeja com
 ponto âmbar (PNG desenhado por escala, sem redimensionar).
+
+## Fase 8 ✅ — git e worktrees
+
+Preparação do worktree por projeto (copiar `.env` e outros, script como `npm install`), botão ▶ que roda
+o projeto num shell ao lado (`{port}` = porta livre), commit / mesclar / abrir PR (via `gh`) na tela de
+mudanças, arquivos editados por chat (hook Edit/Write) com aviso quando dois chats mexem no mesmo arquivo.
+
+## Fase 9 ✅ — visão geral
+
+Painel de todos os agentes (status, últimas linhas, contexto, CPU/memória), quadro de tarefas
+(a fazer → em andamento abre um agente num worktree → revisão automática ao terminar), comparar agentes
+(mesmo prompt em vários worktrees, "ficar com este" commita e mescla), CPU/memória por árvore de processos.
+
+## Fase 10 ✅ — segurança
+
+Pontos de restauração antes de cada prompt do Claude (commit solto em `refs/kora/checkpoints/<chat>/`,
+sem mexer no índice nem na branch; restaurar salva o estado atual antes) e limite diário de tokens por
+chat e por projeto (aviso + fila pausada).
+
+## Fase 11 ✅ — terminal e organização
+
+Navegar entre prompts (Ctrl+Shift+↑/↓) e copiar a última resposta, busca em todas as conversas do Claude,
+snippets com campos `{nome}`, arquivar chats e exportar conversa em Markdown, divisórias e barra lateral
+arrastáveis.

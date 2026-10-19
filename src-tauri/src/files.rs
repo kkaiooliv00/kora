@@ -82,13 +82,15 @@ pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String, permission
         return Err("id de chat inválido".into());
     }
     let curl = if cfg!(windows) { "curl.exe" } else { "curl" };
-    let hook = |state: &str| {
+    // O UserPromptSubmit espera mais: o ponto de restauração é tirado antes de o Claude começar a editar.
+    let hook_with = |state: &str, timeout: u32| {
         let url = format!("http://127.0.0.1:{}/status/{chat}/{state}?t={}", api.port, api.token);
-        json!([{ "matcher": "", "hooks": [{ "type": "command", "command": format!("{curl} -s -m 2 -X POST --data-binary @- \"{url}\"") }] }])
+        json!([{ "matcher": "", "hooks": [{ "type": "command", "command": format!("{curl} -s -m {timeout} -X POST --data-binary @- \"{url}\"") }] }])
     };
+    let hook = |state: &str| hook_with(state, 2);
     let settings = json!({
         "hooks": {
-            "UserPromptSubmit": hook("running"),
+            "UserPromptSubmit": hook_with("running", 15),
             "PreToolUse": hook("running"),
             "PostToolUse": hook("running"),
             "Notification": hook("waiting"),

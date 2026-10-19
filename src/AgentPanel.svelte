@@ -41,7 +41,7 @@
     }
     invoke<Checkpoint[]>('checkpoints', { dir, chat: id })
       .then((list) => app.active === id && (checkpoints = list ?? []))
-      .catch(() => (checkpoints = []))
+      .catch(() => app.active === id && (checkpoints = []))
   })
 
   async function restore(cp: Checkpoint) {

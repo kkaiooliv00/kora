@@ -75,6 +75,15 @@ fn run_setup(dir: &str, root: &str, command: &str) -> Result<String, String> {
             break status;
         }
         if started.elapsed() > SETUP_TIMEOUT {
+            // O cmd/sh é só o pai: no Windows derruba a árvore (npm e filhos) para os pipes fecharem.
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                let _ = Command::new("taskkill")
+                    .args(["/T", "/F", "/PID", &child.id().to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status();
+            }
             let _ = child.kill();
             return Err("o script passou de 10 minutos e foi interrompido".into());
         }
