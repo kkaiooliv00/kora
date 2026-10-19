@@ -45,10 +45,12 @@ export const STATUS: Record<Status, { label: string; color: string }> = {
   error: { label: 'erro', color: '#e5484d' },
 }
 
+const AGY_PROFILE: Profile = { id: 'agy', name: 'Agy', command: 'agy' }
+
 const DEFAULT_PROFILES: Profile[] = [
   { id: 'claude', name: 'Claude', command: 'claude', hooks: 'claude' },
   { id: 'codex', name: 'Codex', command: 'codex' },
-  { id: 'gemini', name: 'Gemini', command: 'gemini' },
+  AGY_PROFILE,
   { id: 'grok', name: 'Grok', command: 'grok' },
   { id: 'opencode', name: 'OpenCode', command: 'opencode' },
   { id: 'shell', name: 'Shell', command: '' },
@@ -87,11 +89,14 @@ export async function load(): Promise<boolean> {
       invoke<Partial<{ profiles: Profile[]; settings: Settings }> | null>('load_json', { name: 'config' }),
       invoke<Partial<{ projects: Project[]; groups: Group[]; chats: Chat[] }> | null>('load_json', { name: 'state' }),
     ])
-    app.profiles = config?.profiles ?? DEFAULT_PROFILES
+    const profiles = config?.profiles ?? DEFAULT_PROFILES
+    // v0.1.0 salvou o perfil "gemini"; o comando certo é o agy.
+    const legacyGemini = profiles.some((p) => p.id === 'gemini' && p.command === 'gemini')
+    app.profiles = profiles.map((p) => (legacyGemini && p.id === 'gemini' ? AGY_PROFILE : p))
     app.settings = { ...DEFAULT_SETTINGS, ...config?.settings }
     app.projects = state?.projects ?? []
     app.groups = state?.groups ?? []
-    app.chats = state?.chats ?? []
+    app.chats = (state?.chats ?? []).map((c) => (legacyGemini && c.profileId === 'gemini' ? { ...c, profileId: 'agy' } : c))
     return true
   } catch (e) {
     fail('Configuração não carregada (nada será salvo até corrigir)', e)

@@ -17,12 +17,20 @@
   let term = $state.raw<Terminal>()
   const fit = new FitAddon()
 
-  async function commandLine(): Promise<string | null> {
-    const profile = app.profiles.find((p) => p.id === chat.profileId)
-    if (!profile?.command) return null
-    if (profile.hooks !== 'claude') return profile.command
-    const settings = await invoke<string>('claude_settings', { chat: chat.id })
-    return `${profile.command} --settings '${settings}'`
+  const profile = app.profiles.find((p) => p.id === chat.profileId)
+
+  /** Separa `codex --model "x y"` em programa + argumentos (aspas simples ou duplas). */
+  function splitCommand(command: string): string[] {
+    return [...command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3])
+  }
+
+  async function spawnArgs(): Promise<{ program: string | null; args: string[] }> {
+    const [program, ...args] = splitCommand(profile?.command ?? '')
+    if (!program) return { program: null, args: [] }
+    if (profile?.hooks === 'claude') {
+      args.push('--settings', await invoke<string>('claude_settings', { chat: chat.id }))
+    }
+    return { program, args }
   }
 
   onMount(() => {
@@ -49,9 +57,11 @@
     fit.fit()
     term = t
 
-    const heuristic = app.profiles.find((p) => p.id === chat.profileId)?.hooks !== 'claude'
+    const heuristic = profile?.hooks !== 'claude'
+    const label = profile?.command ? splitCommand(profile.command)[0] : 'shell'
     let idleTimer: ReturnType<typeof setTimeout> | undefined
     let id: number | undefined
+    let stopped = false
 
     const onData = new Channel<ArrayBuffer>()
     onData.onmessage = (buf) => {
@@ -64,24 +74,39 @@
     const onExit = new Channel<number>()
     onExit.onmessage = (code) => {
       id = undefined
+      stopped = true
       clearTimeout(idleTimer)
       setStatus(chat.id, code === 0 ? 'done' : 'error')
-      t.write(`\r\n\x1b[2m[processo encerrado: ${code}]\x1b[0m\r\n`)
+      t.write(`\r\n\x1b[2m[${label} encerrado (${code}) — Enter para reabrir]\x1b[0m\r\n`)
     }
 
     const cwd = app.projects.find((p) => p.id === chat.projectId)?.path
-    commandLine()
-      .then((line) => invoke<number>('pty_spawn', { line, cwd, cols: t.cols, rows: t.rows, onData, onExit }))
-      .then((pty) => {
-        id = pty
-        setStatus(chat.id, 'idle')
-      })
-      .catch((e) => {
-        setStatus(chat.id, 'error')
-        t.write(`\x1b[31mfalha ao abrir o processo: ${e}\x1b[0m\r\n`)
-      })
+    function start() {
+      stopped = false
+      t.write(`\x1b[2miniciando ${label}…\x1b[0m\r\n`)
+      spawnArgs()
+        .then(({ program, args }) =>
+          invoke<number>('pty_spawn', { program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit }),
+        )
+        .then((pty) => {
+          id = pty
+          setStatus(chat.id, 'idle')
+        })
+        .catch((e) => {
+          stopped = true
+          setStatus(chat.id, 'error')
+          t.write(`\x1b[31mfalha ao abrir: ${e}\x1b[0m\r\n\x1b[2m[ajuste o perfil em Configurações e tecle Enter]\x1b[0m\r\n`)
+        })
+    }
+    start()
 
-    t.onData((data) => id !== undefined && invoke('pty_write', { id, data }))
+    t.onData((data) => {
+      if (id !== undefined) invoke('pty_write', { id, data })
+      else if (stopped && data === '\r') {
+        t.reset()
+        start()
+      }
+    })
     t.onResize(({ cols, rows }) => id !== undefined && invoke('pty_resize', { id, cols, rows }))
 
     const ro = new ResizeObserver(() => el.offsetParent && fit.fit())

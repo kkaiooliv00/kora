@@ -2,6 +2,7 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use std::{
     collections::HashMap,
     io::{Read, Write},
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex,
@@ -39,37 +40,81 @@ fn default_shell() -> String {
     }
 }
 
-/// Roda `line` dentro do shell e mantém o shell aberto quando o comando sai.
-fn command_for(line: Option<String>) -> CommandBuilder {
-    let Some(line) = line.filter(|l| !l.trim().is_empty()) else {
-        return CommandBuilder::new(default_shell());
-    };
-    if cfg!(windows) {
-        let mut cmd = CommandBuilder::new("powershell.exe");
-        cmd.args(["-NoLogo", "-NoExit", "-Command", &line]);
-        cmd
-    } else {
-        let mut cmd = CommandBuilder::new("/bin/sh");
-        cmd.args(["-c", &format!("{line}; exec \"${{SHELL:-/bin/bash}}\" -l")]);
-        cmd
+// Ordem de preferência do Windows; arquivos sem extensão (scripts sh do npm) ficam de fora.
+const WIN_EXTS: [&str; 5] = ["exe", "com", "cmd", "bat", "ps1"];
+
+/// Procura `program` nas pastas dadas como o Windows faria, mas só com extensões executáveis.
+fn find_executable(program: &str, dirs: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
+    let path = Path::new(program);
+    let has_ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| WIN_EXTS.contains(&e.to_ascii_lowercase().as_str()));
+    if path.is_absolute() {
+        return path.is_file().then(|| path.to_path_buf());
     }
+    dirs.into_iter().find_map(|dir| {
+        if has_ext {
+            return Some(dir.join(program)).filter(|p| p.is_file());
+        }
+        WIN_EXTS
+            .iter()
+            .map(|ext| dir.join(format!("{program}.{ext}")))
+            .find(|p| p.is_file())
+    })
+}
+
+/// Abre o agente direto, sem shell no meio (o PowerShell custava ~0,5 s por chat).
+fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, String> {
+    if !cfg!(windows) {
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
+        return Ok(cmd);
+    }
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let exe = find_executable(program, std::env::split_paths(&path_var))
+        .ok_or_else(|| format!("'{program}' não foi encontrado no PATH"))?;
+    let ext = exe.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    // ponytail: cmd /c quebra se o caminho do .cmd tiver espaço E houver args com aspas;
+    // resolver com o parser de linha do cmd se aparecer.
+    let mut cmd = match ext.as_str() {
+        "cmd" | "bat" => {
+            let mut c = CommandBuilder::new("cmd.exe");
+            c.args(["/d", "/c"]);
+            c.arg(&exe);
+            c
+        }
+        "ps1" => {
+            let mut c = CommandBuilder::new("powershell.exe");
+            c.args(["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+            c.arg(&exe);
+            c
+        }
+        _ => CommandBuilder::new(&exe),
+    };
+    cmd.args(args);
+    Ok(cmd)
 }
 
 #[tauri::command]
 pub fn pty_spawn(
     state: State<Ptys>,
-    line: Option<String>,
+    program: Option<String>,
+    args: Option<Vec<String>>,
     cwd: Option<String>,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
     on_exit: Channel<u32>,
 ) -> Result<u32, String> {
+    let mut builder = match program.filter(|p| !p.trim().is_empty()) {
+        Some(program) => agent_command(&program, &args.unwrap_or_default())?,
+        None => CommandBuilder::new(default_shell()),
+    };
     let pair = native_pty_system()
         .openpty(size(cols, rows))
         .map_err(|e| e.to_string())?;
 
-    let mut builder = command_for(line);
     if let Some(dir) = cwd {
         builder.cwd(dir);
     }
@@ -132,5 +177,31 @@ pub fn pty_kill(state: State<Ptys>, id: u32) -> Result<(), String> {
     match state.map.lock().unwrap().get_mut(&id) {
         Some(pty) => pty.killer.kill().map_err(|e| e.to_string()),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_executable;
+    use std::fs;
+
+    #[test]
+    fn find_executable_skips_extensionless_scripts() {
+        let root = std::env::temp_dir().join(format!("kora-find-{}", std::process::id()));
+        let (npm, bin) = (root.join("npm"), root.join("bin"));
+        fs::create_dir_all(&npm).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(npm.join("gemini"), "#!/bin/sh").unwrap();
+        fs::write(npm.join("gemini.cmd"), "").unwrap();
+        fs::write(npm.join("codex.cmd"), "").unwrap();
+        fs::write(bin.join("codex.exe"), "").unwrap();
+
+        let dirs = || vec![npm.clone(), bin.clone()].into_iter();
+        assert_eq!(find_executable("gemini", dirs()), Some(npm.join("gemini.cmd")));
+        assert_eq!(find_executable("codex", dirs()), Some(npm.join("codex.cmd")));
+        assert_eq!(find_executable("codex.exe", dirs()), Some(bin.join("codex.exe")));
+        assert_eq!(find_executable("nada", dirs()), None);
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }
