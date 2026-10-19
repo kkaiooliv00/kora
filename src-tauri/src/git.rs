@@ -104,9 +104,75 @@ pub async fn git_diff(dir: String) -> Result<Changes, String> {
     Ok(Changes { status, diff })
 }
 
+/// Branch como argumento de git: sem `-` no começo (viraria opção) e só caracteres de ref comuns.
+fn valid_branch(branch: &str) -> Result<&str, String> {
+    let ok = !branch.is_empty()
+        && !branch.starts_with('-')
+        && !branch.contains("..")
+        && branch.chars().all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c));
+    if ok { Ok(branch) } else { Err(format!("nome de branch inválido: {branch}")) }
+}
+
+/// `git add -A` + commit com a mensagem; devolve a linha do commit.
+#[tauri::command]
+pub async fn git_commit(dir: String, message: String) -> Result<String, String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("escreva uma mensagem de commit".into());
+    }
+    git(&dir, &["add", "-A"])?;
+    git(&dir, &["commit", "-m", message]).map(|out| out.lines().next().unwrap_or_default().to_string())
+}
+
+/// Mescla a branch do worktree na branch atual da pasta do projeto (`--no-ff`).
+/// Em conflito, desfaz o merge: o projeto fica como estava.
+#[tauri::command]
+pub async fn git_merge(project: String, branch: String) -> Result<String, String> {
+    let branch = valid_branch(&branch)?;
+    let dirty = git(&project, &["status", "--porcelain", "--untracked-files=no"])?;
+    if !dirty.trim().is_empty() {
+        return Err("a pasta do projeto tem mudanças não commitadas; faça commit ou stash antes de mesclar".into());
+    }
+    git(&project, &["merge", "--no-ff", "--no-edit", branch]).map_err(|e| {
+        let _ = git(&project, &["merge", "--abort"]);
+        format!("conflito ao mesclar; nada foi alterado.\n{e}")
+    })
+}
+
+/// Publica a branch e abre o PR pelo GitHub CLI (`gh`); devolve a URL do PR.
+#[tauri::command]
+pub async fn git_pr(dir: String, branch: String) -> Result<String, String> {
+    let branch = valid_branch(&branch)?;
+    git(&dir, &["push", "-u", "origin", branch])?;
+    let mut cmd = Command::new("gh");
+    cmd.current_dir(&dir).args(["pr", "create", "--fill", "--head", branch]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().map_err(|_| "GitHub CLI (gh) não encontrado; instale e rode gh auth login".to_string())?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    // Se o PR já existe, o gh também imprime a URL dele.
+    text.split_whitespace()
+        .find(|w| w.starts_with("https://"))
+        .map(str::to_string)
+        .ok_or_else(|| text.trim().to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::slug;
+    use super::{slug, valid_branch};
+
+    #[test]
+    fn valid_branch_rejects_options_and_odd_refs() {
+        assert!(valid_branch("kora/claude-2-a1b2c3").is_ok());
+        assert!(valid_branch("feat/tray_icon.v2").is_ok());
+        assert!(valid_branch("--upload-pack=x").is_err());
+        assert!(valid_branch("a..b").is_err());
+        assert!(valid_branch("a b").is_err());
+        assert!(valid_branch("").is_err());
+    }
 
     #[test]
     fn slug_keeps_only_safe_characters() {

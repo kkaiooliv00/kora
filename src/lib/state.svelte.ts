@@ -3,11 +3,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
 import { DEFAULT_PERMISSIONS, type Permissions } from './permissions'
-import { toast } from './toasts.svelte'
+import { dismiss, toast } from './toasts.svelte'
 import type { Queue } from './queue'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project'
 
 export interface Profile {
   id: string
@@ -23,6 +23,12 @@ export interface Project {
   id: string
   name: string
   path: string
+  /** Arquivos copiados da raiz para cada worktree novo, separados por vírgula (padrão: .env). */
+  setupFiles?: string
+  /** Roda no worktree novo antes do agente abrir (ex.: npm install). */
+  setupCommand?: string
+  /** Comando do botão ▶; `{port}` vira uma porta livre. */
+  runCommand?: string
 }
 export interface Group {
   id: string
@@ -38,6 +44,8 @@ export interface Chat {
   /** Pasta do git worktree próprio (vazio = pasta do projeto). */
   cwd?: string
   branch?: string
+  /** Shell que roda o projeto para o chat `runOf` (mesma pasta; não é dono do worktree). */
+  runOf?: string
   /** Sessão do Claude, para retomar a conversa ao reabrir. */
   sessionId?: string
   /** Última vez aberto (ms), para a lista de recentes. */
@@ -78,6 +86,8 @@ export interface HookDetail {
   tool?: string
   todos?: { content: string; status: string }[]
   context?: { tokens: number; model: string }
+  /** Arquivo que o agente editou (Edit/Write). */
+  file?: string
 }
 
 /** Uma aba com um ou mais chats lado a lado. */
@@ -145,6 +155,10 @@ export const app = $state({
   /** Chat com foco (recebe snippets, busca, fila). */
   active: null as string | null,
   status: {} as Record<string, Status>,
+  /** Arquivos que cada chat editou nesta sessão, relativos à pasta dele. */
+  touched: {} as Record<string, string[]>,
+  /** Projeto aberto no modal de configuração. */
+  editingProject: null as string | null,
   /** Prompts esperando o agente ficar pronto, por chat. */
   queue: {} as Record<string, Queue>,
   modal: null as Modal | null,
@@ -295,6 +309,58 @@ export function removeGroup(id: string) {
   app.groups = app.groups.filter((g) => g.id !== id)
 }
 
+const DEFAULT_SETUP_FILES = '.env'
+
+/** Copia os arquivos combinados (padrão .env) e roda o script do projeto no worktree novo. Falha não impede o chat. */
+async function prepareWorktree(project: Project, dir: string) {
+  const files = (project.setupFiles ?? DEFAULT_SETUP_FILES).split(',').map((f) => f.trim()).filter(Boolean)
+  const command = project.setupCommand?.trim() ?? ''
+  if (files.length === 0 && !command) return
+  const id = command ? toast({ tone: 'info', title: 'Preparando worktree…', text: command }) : undefined
+  try {
+    const note = await invoke<string>('worktree_setup', { dir, root: project.path, files, command })
+    if (command) toast({ tone: 'success', title: 'Worktree pronto', text: note.trim().split('\n').slice(-3).join('\n') || undefined })
+  } catch (e) {
+    fail('Preparação do worktree falhou (o chat abre mesmo assim)', e)
+  } finally {
+    if (id) dismiss(id)
+  }
+}
+
+/** Abre um shell ao lado do chat, na mesma pasta, rodando o comando do projeto (`{port}` = porta livre). */
+export async function runProject(sourceId: string) {
+  const source = chatById(sourceId)
+  const project = source && projectOf(source)
+  const shell = app.profiles.find((p) => !p.command.trim())
+  if (!source || !project || !shell) return
+  if (!project.runCommand?.trim()) {
+    app.editingProject = project.id
+    app.modal = 'project'
+    return
+  }
+  const existing = app.chats.find((c) => c.runOf === source.id)
+  if (existing) return splitChat(existing.id)
+  try {
+    const port = await invoke<number>('free_port')
+    const chat: Chat = {
+      id: uid(),
+      name: `▶ ${source.name}`,
+      profileId: shell.id,
+      projectId: source.projectId,
+      groupId: source.groupId,
+      cwd: source.cwd,
+      branch: source.branch,
+      runOf: source.id,
+    }
+    app.chats.push(chat)
+    app.pendingPrompt[chat.id] = project.runCommand.replaceAll('{port}', String(port))
+    focusChat(source.id)
+    splitChat(chat.id)
+  } catch (e) {
+    fail('Não foi possível rodar o projeto', e)
+  }
+}
+
 /** `worktree`: o chat ganha um git worktree e uma branch `kora/...` só dele. Devolve o id criado. */
 export async function addChat(projectId: string, profileId: string, groupId?: string, worktree = false): Promise<string | undefined> {
   const profile = app.profiles.find((p) => p.id === profileId)
@@ -314,6 +380,7 @@ export async function addChat(projectId: string, profileId: string, groupId?: st
       fail('Worktree não criado', e)
       return undefined
     }
+    await prepareWorktree(project, chat.cwd)
   }
   app.chats.push(chat)
   openChat(chat.id)
@@ -334,7 +401,8 @@ export async function removeChat(id: string) {
   if (!chat) return
   closePane(id)
   app.chats = app.chats.filter((c) => c.id !== id)
-  if (!chat.cwd) return
+  // O shell de "rodar" usa a pasta do chat, mas o worktree não é dele.
+  if (!chat.cwd || chat.runOf) return
   const remove = await ask(`Apagar também o worktree em ${chat.cwd}? A branch ${chat.branch} continua no repositório.`, {
     title: 'Remover chat',
     kind: 'warning',

@@ -10,6 +10,7 @@ import {
   openChat,
   projectOf,
   updateChat,
+  type Chat,
   type HookDetail,
   type Snippet,
   type Status,
@@ -71,6 +72,7 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
   updateAgentInfo(id, status, detail)
   if (!chat) return
+  if (detail?.file) noteTouched(chat, detail.file)
   const finished = status === 'idle' && previous === 'running'
   // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
   if (!document.hasFocus()) {
@@ -82,6 +84,39 @@ export function onHookStatus(id: string, status: Status, session: string | null,
       title: `${chat.name} aguarda você`,
       text: detail?.message ?? 'O agente parou esperando uma resposta sua.',
       actions: [{ label: 'Ir para o chat', primary: true, run: () => openChat(id) }],
+    })
+  }
+}
+
+/** Caminho relativo à pasta do chat, com `/`; worktrees diferentes comparam pelo mesmo caminho. */
+export function relativeTo(dir: string | undefined, file: string): string {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  const path = norm(file)
+  const base = dir ? norm(dir) : ''
+  return base && path.toLowerCase().startsWith(`${base.toLowerCase()}/`) ? path.slice(base.length + 1) : path
+}
+
+/** Outros chats abertos do mesmo projeto que editaram o mesmo arquivo. */
+export function sharedWith(chat: Chat, path: string): Chat[] {
+  return app.chats.filter((c) => c.id !== chat.id && c.projectId === chat.projectId && isOpen(c.id) && app.touched[c.id]?.includes(path))
+}
+
+const warnedConflicts = new Set<string>()
+
+function noteTouched(chat: Chat, file: string) {
+  const path = relativeTo(chatDir(chat), file)
+  const list = app.touched[chat.id] ?? []
+  if (list.includes(path)) return
+  app.touched[chat.id] = [...list, path]
+  for (const other of sharedWith(chat, path)) {
+    const key = [chat.id, other.id].sort().join(':') + path
+    if (warnedConflicts.has(key)) continue
+    warnedConflicts.add(key)
+    toast({
+      tone: 'warning',
+      title: `${chat.name} e ${other.name} editaram o mesmo arquivo`,
+      text: `${path}: pode dar conflito no merge.`,
+      actions: [{ label: 'Ver mudanças', primary: true, run: () => (openChat(chat.id), (app.modal = 'diff')) }],
     })
   }
 }

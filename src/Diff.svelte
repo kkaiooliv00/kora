@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core'
-  import { app, chatById, chatDir } from './lib/state.svelte'
+  import { app, chatById, chatDir, fail, projectOf, removeChat } from './lib/state.svelte'
+  import { toast } from './lib/toasts.svelte'
   import { parseDiff, type DiffFile } from './lib/diff'
   import EmptyState from './EmptyState.svelte'
   import Skeleton from './Skeleton.svelte'
@@ -17,6 +18,55 @@
 
   const untracked = $derived(status.filter((l) => l.startsWith('??')).map((l) => l.slice(3)))
   const notRepo = $derived(/not a git repository/i.test(error))
+  const hasChanges = $derived(files.length > 0 || untracked.length > 0)
+
+  // Fluxo do worktree: commit aqui, depois mesclar na branch do projeto ou abrir PR.
+  const project = chat ? projectOf(chat) : undefined
+  const worktreeBranch = chat?.runOf ? undefined : chat?.branch
+  let message = $state('')
+  let busy = $state('')
+  let mainBranch = $state<string | null>(null)
+  if (project && worktreeBranch) invoke<string | null>('git_branch', { dir: project.path }).then((b) => (mainBranch = b))
+
+  async function act(label: string, run: () => Promise<void>) {
+    busy = label
+    try {
+      await run()
+    } catch (e) {
+      fail(`${label}: falhou`, e)
+    } finally {
+      busy = ''
+    }
+  }
+
+  const commit = () =>
+    act('Commit', async () => {
+      const line = await invoke<string>('git_commit', { dir, message })
+      message = ''
+      if (chat) app.touched[chat.id] = []
+      toast({ tone: 'success', title: 'Commit criado', text: line })
+      await refresh()
+    })
+
+  const merge = () =>
+    act('Mesclar', async () => {
+      if (!project || !worktreeBranch || !chat) return
+      await invoke('git_merge', { project: project.path, branch: worktreeBranch })
+      toast({
+        tone: 'success',
+        title: `${worktreeBranch} mesclada em ${mainBranch ?? 'projeto'}`,
+        text: 'O worktree pode ser removido; a branch continua no repositório.',
+        actions: [{ label: 'Remover chat e worktree', run: () => removeChat(chat.id) }],
+      })
+    })
+
+  const pullRequest = () =>
+    act('Abrir PR', async () => {
+      if (!worktreeBranch) return
+      const url = await invoke<string>('git_pr', { dir, branch: worktreeBranch })
+      await invoke('open_url', { url, browser: app.settings.browser || null })
+      toast({ tone: 'success', title: 'PR aberto', text: url })
+    })
 
   async function gitInit() {
     if (!dir) return
@@ -57,6 +107,28 @@
       <button class="btn" onclick={refresh} disabled={loading}>{loading ? 'Carregando…' : 'Atualizar'}</button>
       <button class="btn ghost" onclick={() => (app.modal = null)}>Fechar</button>
     </header>
+
+    {#if !error && dir}
+      <div class="actions">
+        <form class="commit" onsubmit={(e) => (e.preventDefault(), commit())}>
+          <input class="input" bind:value={message} placeholder="Mensagem do commit" aria-label="Mensagem do commit" disabled={!hasChanges} />
+          <button class="btn" type="submit" disabled={!hasChanges || !message.trim() || !!busy}>{busy === 'Commit' ? 'Commitando…' : 'Commit'}</button>
+        </form>
+        {#if worktreeBranch}
+          <button
+            class="btn"
+            onclick={merge}
+            disabled={hasChanges || !!busy}
+            title={hasChanges ? 'Faça commit das mudanças antes de mesclar' : `git merge --no-ff ${worktreeBranch}`}
+          >
+            {busy === 'Mesclar' ? 'Mesclando…' : `Mesclar em ${mainBranch ?? 'projeto'}`}
+          </button>
+          <button class="btn primary" onclick={pullRequest} disabled={hasChanges || !!busy} title="git push + gh pr create">
+            {busy === 'Abrir PR' ? 'Abrindo…' : 'Abrir PR'}
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     <div class="body">
       {#if error}
@@ -147,6 +219,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .actions {
+    display: flex;
+    gap: var(--space-2);
+    margin: var(--space-3) 0;
+  }
+  .commit {
+    display: flex;
+    flex: 1;
+    gap: var(--space-2);
+  }
+  .commit .input {
+    flex: 1;
   }
   .body {
     flex: 1;

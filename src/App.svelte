@@ -18,6 +18,8 @@
   import Queue from './Queue.svelte'
   import Diff from './Diff.svelte'
   import Usage from './Usage.svelte'
+  import ProjectSettings from './ProjectSettings.svelte'
+  import Play from '@lucide/svelte/icons/play'
   import Kbd from './Kbd.svelte'
   import ToastStack from './ToastStack.svelte'
   import Menu from './Menu.svelte'
@@ -36,6 +38,7 @@
     closePane,
     closeTab,
     popOut,
+    runProject,
     toggleDirection,
     STATUS,
     type Status,
@@ -256,6 +259,11 @@
               {#if app.status[chat.id] && app.status[chat.id] !== 'idle'}
                 <span class="badge {status.tone}">{status.glyph} {status.label}</span>
               {/if}
+              {#if !chat.runOf}
+                <button class="icon-btn" title="Rodar o projeto ao lado" aria-label="Rodar o projeto" onclick={() => runProject(chat.id)}>
+                  <Play size={14} strokeWidth={1.5} />
+                </button>
+              {/if}
               <button class="icon-btn" title="Dividir com outro chat" aria-label="Dividir com outro chat" onclick={() => { focusChat(chat.id); openPalette('Dividir com ') }}>
                 <Columns2 size={14} strokeWidth={1.5} />
               </button>
@@ -294,6 +302,7 @@
   {#if app.modal === 'queue'}<Queue />{/if}
   {#if app.modal === 'diff'}<Diff />{/if}
   {#if app.modal === 'usage'}<Usage />{/if}
+  {#if app.modal === 'project'}<ProjectSettings />{/if}
 
   <ToastStack />
   <Menu />

@@ -11,6 +11,8 @@ use std::{
 const MAX_MESSAGE: usize = 500;
 const MAX_TODOS: usize = 50;
 const MAX_TODO_TEXT: usize = 200;
+const MAX_PATH: usize = 500;
+const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// O transcript cresce sem limite: o uso mais recente está no fim, então lê só a cauda.
 const TRANSCRIPT_TAIL: u64 = 256 * 1024;
 
@@ -65,6 +67,13 @@ pub fn detail(body: &str) -> Option<Value> {
     }
     if let Some(tool) = hook.get("tool_name").and_then(Value::as_str) {
         out["tool"] = json!(truncate(tool, 60));
+        // Arquivo que o agente editou: alimenta "arquivos alterados" e o aviso de conflito entre chats.
+        if EDIT_TOOLS.contains(&tool) {
+            let path = hook.pointer("/tool_input/file_path").or_else(|| hook.pointer("/tool_input/notebook_path"));
+            if let Some(path) = path.and_then(Value::as_str) {
+                out["file"] = json!(truncate(path, MAX_PATH));
+            }
+        }
         if tool == "TodoWrite" {
             if let Some(list) = hook.pointer("/tool_input/todos") {
                 out["todos"] = todos(list);
@@ -94,6 +103,14 @@ mod tests {
         let note = detail(r#"{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}"#).unwrap();
         assert_eq!(note["message"], "Claude needs your permission to use Bash");
         assert!(detail("não é json").is_none());
+    }
+
+    #[test]
+    fn detail_keeps_edited_file_only_for_edit_tools() {
+        let edit = detail(r#"{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"C:/p/src/a.ts"}}"#).unwrap();
+        assert_eq!(edit["file"], "C:/p/src/a.ts");
+        let read = detail(r#"{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"C:/p/b.ts"}}"#).unwrap();
+        assert!(read.get("file").is_none());
     }
 
     #[test]

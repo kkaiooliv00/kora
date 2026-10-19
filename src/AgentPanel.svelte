@@ -2,6 +2,7 @@
   import { app, chatById } from './lib/state.svelte'
   import { CATEGORIES, type Policy } from './lib/permissions'
   import EmptyState from './EmptyState.svelte'
+  import { sharedWith } from './lib/automation'
 
   // Janela de contexto padrão do Claude; 1M na variante [1m], acima de 200k ou nos Opus que já vêm com 1M.
   // ponytail: tabela por nome de modelo; o tamanho exato só chega no JSON da statusline, que é do usuário.
@@ -23,6 +24,7 @@
     info?.context && (info.context.tokens > DEFAULT_WINDOW || LARGE_BY_DEFAULT.test(info.context.model)) ? LARGE_WINDOW : DEFAULT_WINDOW,
   )
   const contextPct = $derived(info?.context ? Math.min(100, Math.round((info.context.tokens / contextWindow) * 100)) : 0)
+  const touched = $derived(app.active ? (app.touched[app.active] ?? []) : [])
   const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
 </script>
 
@@ -65,6 +67,24 @@
         {/each}
       </ul>
       <button class="link" onclick={() => (app.modal = 'settings')}>Editar permissões</button>
+    </section>
+
+    <section>
+      <p class="overline">arquivos alterados</p>
+      {#if touched.length}
+        <ul class="files">
+          {#each touched as path (path)}
+            {@const others = sharedWith(chat, path)}
+            <li title={others.length ? `também editado por ${others.map((c) => c.name).join(', ')}` : path}>
+              {#if others.length}<span class="conflict" aria-label="editado por outro chat">!</span>{/if}
+              <span class="path">{path}</span>
+            </li>
+          {/each}
+        </ul>
+        <button class="link" onclick={() => (app.modal = 'diff')}>Ver mudanças</button>
+      {:else}
+        <EmptyState kind="empty" title="Nenhum arquivo editado" compact>Os arquivos que o agente editar nesta sessão aparecem aqui.</EmptyState>
+      {/if}
     </section>
 
     <section>
@@ -145,6 +165,24 @@
     color: var(--accent);
     text-decoration: underline;
     text-underline-offset: 2px;
+  }
+  .files li {
+    display: flex;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .files .path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+    font: 12px var(--font-mono);
+  }
+  .conflict {
+    flex: none;
+    font: 600 12px var(--font-mono);
+    color: var(--warning);
   }
   .meter {
     height: 4px;

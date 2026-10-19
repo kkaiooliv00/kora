@@ -13,6 +13,7 @@
     renameChat,
     moveChat,
     openChat,
+    runProject,
     splitChat,
     closePane,
     isOpen,
@@ -126,6 +127,7 @@
           app.modal = 'queue'
         },
       },
+      { label: 'Rodar projeto ao lado', disabled: !!chat.runOf, run: () => runProject(chat.id) },
       { separator: true },
       {
         label: 'Mover para grupo',
@@ -148,6 +150,13 @@
       { label: 'Novo chat em worktree', submenu: app.profiles.map((p) => ({ label: p.name, run: () => addChat(project.id, p.id, undefined, true) })) },
       { label: 'Novo grupo', run: () => toggle({ kind: 'group', projectId: project.id }) },
       { separator: true },
+      {
+        label: 'Configurar projeto…',
+        run: () => {
+          app.editingProject = project.id
+          app.modal = 'project'
+        },
+      },
       { label: 'Abrir no editor', run: () => openInEditor(project.path) },
       { separator: true },
       { label: 'Remover projeto', danger: true, run: () => removeProject(project.id) },
