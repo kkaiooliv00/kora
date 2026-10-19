@@ -25,8 +25,6 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
-
 <div class="backdrop">
   <div class="modal queue" role="dialog" aria-modal="true" aria-label="Fila de prompts">
     <div class="content">

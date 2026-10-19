@@ -46,6 +46,7 @@
   import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents } from './lib/automation'
   import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS, openPalette } from './lib/commands'
+  import { menuState } from './lib/menu.svelte'
   import { comboOf, normalizeCombo } from './lib/keys'
 
   const SAVE_DELAY_MS = 300
@@ -54,9 +55,19 @@
   let saveTimer: ReturnType<typeof setTimeout> | undefined
   let lastWaiting = 0
   let branch = $state<string | null>(null)
+  // Sem aba ativa = tela inicial; as abas seguem montadas (processos vivos) e voltam com um clique.
+  const hasTab = $derived(app.tabs.some((t) => t.id === app.activeTab))
+  const goHome = () => (app.activeTab = null)
 
   /** Atalhos globais: rodam antes do terminal receber a tecla. */
   function onKey(e: KeyboardEvent) {
+    // Esc fecha qualquer modal aqui, na captura: se o foco estiver no terminal, o xterm engoliria a tecla.
+    if (e.key === 'Escape' && app.modal && !menuState.open) {
+      e.preventDefault()
+      e.stopPropagation()
+      app.modal = null
+      return
+    }
     const combo = comboOf(e)
     const action = Object.entries(app.settings.keys).find(([, keys]) => normalizeCombo(keys) === combo)?.[0]
     if (!action || !ACTIONS[action]) return
@@ -152,7 +163,9 @@
 
 <div class="app">
   <header class="topbar">
-    <img class="glyph" src={glyph} alt="kora" width="18" height="18" />
+    <button class="icon-btn glyph" class:on={!hasTab} title="Início" aria-label="Início" onclick={goHome}>
+      <img src={glyph} alt="" width="18" height="18" />
+    </button>
     <nav class="tabs" aria-label="Sessões abertas">
       {#each app.tabs as tab (tab.id)}
         {@const active = app.activeTab === tab.id}
@@ -179,7 +192,7 @@
           </button>
         </div>
       {/each}
-      <button class="icon-btn add" title="Nova sessão" aria-label="Nova sessão" onclick={() => openPalette('Novo ')}>
+      <button class="icon-btn add" title="Nova sessão" aria-label="Nova sessão" onclick={goHome}>
         <Plus size={16} strokeWidth={1.5} />
       </button>
     </nav>
@@ -258,9 +271,8 @@
             <ApprovalCard chatId={chat.id} />
           </div>
         </section>
-      {:else}
-        <Welcome />
       {/each}
+      {#if !hasTab}<Welcome />{/if}
     </main>
     {#if showPanel}<AgentPanel />{/if}
   </div>

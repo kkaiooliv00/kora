@@ -102,8 +102,6 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
-
 <div class="page" role="dialog" aria-modal="true" aria-label="Uso de tokens">
   <header>
     <button class="icon-btn" aria-label="Voltar" title="Voltar (Esc)" onclick={() => (app.modal = null)}>

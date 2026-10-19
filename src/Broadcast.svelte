@@ -56,8 +56,6 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
-
 {#snippet chatLine(chat: Chat, indent: boolean)}
   <label class="line chat" class:indent>
     <input type="checkbox" value={chat.id} bind:group={selected} />

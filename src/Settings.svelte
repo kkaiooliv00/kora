@@ -94,8 +94,6 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
-
 {#snippet segmented(value: Policy, onchange: (p: Policy) => void, label: string)}
   <div class="segmented" role="radiogroup" aria-label={label}>
     {#each POLICIES as policy (policy.value)}

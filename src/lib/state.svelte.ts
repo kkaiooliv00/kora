@@ -241,7 +241,8 @@ function restoreTabs(state: Partial<SavedState>) {
     .map((t) => ({ ...t, panes: t.panes.filter((id) => known.has(id)) }))
     .filter((t) => t.panes.length > 0)
   const active = state.active && known.has(state.active) ? state.active : app.tabs[0]?.panes[0]
-  if (active) focusChat(active)
+  // Abre na tela inicial; as abas restauradas ficam no topo, a um clique.
+  app.active = active ?? null
 }
 
 export function save(config: unknown, state: unknown) {

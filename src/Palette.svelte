@@ -41,8 +41,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') app.modal = null
-    else if (e.key === 'ArrowDown') selected = Math.min(selected + 1, flat.length - 1)
+    if (e.key === 'ArrowDown') selected = Math.min(selected + 1, flat.length - 1)
     else if (e.key === 'ArrowUp') selected = Math.max(selected - 1, 0)
     else if (e.key === 'Enter') run(flat[selected])
     else return
@@ -52,7 +51,8 @@
   const keysOf = (combo: string) => normalizeCombo(combo).split('+')
 </script>
 
-<div class="backdrop top">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Esc fecha pelo App) -->
+<div class="backdrop top" onclick={(e) => e.target === e.currentTarget && (app.modal = null)}>
   <div class="palette" role="dialog" aria-modal="true" aria-label="Paleta de comandos">
     <div class="search">
       <Search size={16} strokeWidth={1.5} />

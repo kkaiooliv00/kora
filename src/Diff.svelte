@@ -47,8 +47,6 @@
   refresh()
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && (app.modal = null)} />
-
 <div class="backdrop">
   <div class="modal diff" role="dialog" aria-modal="true" aria-label="Mudanças">
     <header>
