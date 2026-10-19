@@ -57,7 +57,10 @@
     error = ''
     try {
       const usage = await invoke<{ rows: Row[]; files: number }>('usage_summary', { days })
-      rows = usage.rows
+      // O Rust escolhe arquivos por data de modificação; uma sessão antiga retomada hoje traz
+      // dias de fora do período. Corte em UTC, como os dias que vêm do log.
+      const cutoff = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10)
+      rows = usage.rows.filter((r) => r.day >= cutoff)
       files = usage.files
     } catch (e) {
       error = String(e)

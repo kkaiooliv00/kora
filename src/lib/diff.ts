@@ -34,9 +34,10 @@ export function parseDiff(diff: string): DiffFile[] {
       oldNo = Number(hunk[1])
       newNo = Number(hunk[2])
       file.lines.push({ kind: 'hunk', text: hunk[3].trim() })
-    } else if (line.startsWith('+++ ')) {
+    } else if (file.lines.length === 0 && line.startsWith('+++ ')) {
+      // Cabeçalho só antes do primeiro hunk: dentro dele, "+++ x" é uma linha adicionada "++ x".
       if (line !== '+++ /dev/null') file.path = line.slice(4).replace(/^b\//, '')
-    } else if (line.startsWith('--- ') || line.startsWith('index ') || line.startsWith('\\')) {
+    } else if ((file.lines.length === 0 && line.startsWith('--- ')) || line.startsWith('index ') || line.startsWith('\\')) {
       continue
     } else if (line.startsWith('Binary files')) {
       file.binary = true

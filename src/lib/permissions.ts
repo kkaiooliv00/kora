@@ -38,9 +38,12 @@ export function bashRule(pattern: string): string {
 export function claudePermissions(p: Permissions): { allow: string[]; ask: string[]; deny: string[] } {
   const byPolicy = (policy: Policy) => CATEGORIES.filter((c) => p[c.key] === policy).flatMap((c) => c.tools)
   const commands = (list: string[]) => list.filter((c) => c.trim()).map(bashRule)
+  // O Claude avalia deny → ask → allow: um `Bash` genérico em ask venceria os comandos liberados.
+  // Sem ele o Bash continua perguntando (é o padrão do Claude), e os liberados passam direto.
+  const hasAllowedCommands = p.allowCommands.some((c) => c.trim())
   return {
     allow: [...byPolicy('allow'), ...commands(p.allowCommands)],
-    ask: byPolicy('ask'),
+    ask: byPolicy('ask').filter((tool) => !(tool === 'Bash' && hasAllowedCommands)),
     deny: [...byPolicy('deny'), ...commands(p.denyCommands)],
   }
 }

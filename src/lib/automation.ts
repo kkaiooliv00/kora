@@ -86,6 +86,11 @@ export function onHookStatus(id: string, status: Status, session: string | null,
 
 const PERMISSION_MESSAGE = /permission/i
 
+/** Você respondeu direto no terminal: o cartão de aprovação some (senão ficaria até o próximo hook). */
+export function clearPermission(id: string) {
+  if (app.agentInfo[id]?.permission) app.agentInfo[id] = { ...app.agentInfo[id], permission: undefined }
+}
+
 /** Plano, contexto e pedido de permissão do painel; a permissão some quando o agente volta a andar. */
 function updateAgentInfo(id: string, status: Status, detail: HookDetail | null) {
   const info = { ...app.agentInfo[id] }

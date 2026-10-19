@@ -8,7 +8,7 @@
   import { invoke, Channel } from '@tauri-apps/api/core'
   import '@xterm/xterm/css/xterm.css'
   import { app, chatDir, fail, focusChat, updateChat, type Chat } from './lib/state.svelte'
-  import { noteHumanInput, setStatus } from './lib/automation'
+  import { clearPermission, noteHumanInput, setStatus } from './lib/automation'
   import { terminals } from './lib/terminals'
   import { splitCommand } from './lib/command'
   import { claudePermissions } from './lib/permissions'
@@ -217,7 +217,10 @@
     start()
 
     // Só tecla de verdade conta como você (onData também traz respostas automáticas do terminal).
-    t.onKey(() => noteHumanInput())
+    t.onKey(() => {
+      noteHumanInput()
+      clearPermission(chat.id)
+    })
     t.onData((data) => {
       if (id !== undefined) write(data)
       else if (stopped && data === '\r') {
