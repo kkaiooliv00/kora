@@ -33,7 +33,7 @@ pub fn is_valid_id(id: &str) -> bool {
 }
 
 pub fn start(app: AppHandle) -> Result<Api, Box<dyn Error>> {
-    let server = Server::http("127.0.0.1:0")?;
+    let server = Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = server
         .server_addr()
         .to_ip()
