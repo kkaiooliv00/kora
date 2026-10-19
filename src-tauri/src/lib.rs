@@ -26,5 +26,5 @@ pub fn run() {
             files::open_url
         ])
         .run(tauri::generate_context!())
-        .expect("falha ao iniciar o Terminal Person");
+        .expect("falha ao iniciar o Kora");
 }
