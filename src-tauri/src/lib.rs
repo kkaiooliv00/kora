@@ -1,9 +1,11 @@
 mod api;
+mod checkpoint;
 mod files;
 mod git;
 mod hooks;
 mod project;
 mod pty;
+mod stats;
 mod tray;
 mod usage;
 
@@ -15,6 +17,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(pty::Ptys::default())
+        .manage(stats::Stats::default())
         .setup(|app| {
             let api = api::start(app.handle().clone())?;
             app.manage(api);
@@ -44,6 +47,9 @@ pub fn run() {
             project::worktree_setup,
             project::free_port,
             tray::set_waiting,
+            stats::pty_stats,
+            checkpoint::checkpoints,
+            checkpoint::restore_checkpoint,
             usage::usage_summary
         ])
         .run(tauri::generate_context!())

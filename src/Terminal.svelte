@@ -275,6 +275,7 @@
         for (let i = start; i < buffer.length; i++) out.push(buffer.getLine(i)?.translateToString(true) ?? '')
         return out.join('\n').trimEnd()
       },
+      pty: () => id,
     })
 
     const onPaste = pasteImage(t)

@@ -26,6 +26,7 @@
   app.settingsSection = null
   let section = $state<Section>(requested ?? 'geral')
   let draft = $state({ ...app.settings })
+  let budget = $state({ ...app.settings.budget })
   const preview = $derived(themeOf(draft.theme))
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
@@ -90,6 +91,10 @@
       keys,
       snippets,
       permissions: $state.snapshot(permissions),
+      budget: {
+        chatTokens: Math.max(0, Math.round(Number(budget.chatTokens) || 0)),
+        projectTokens: Math.max(0, Math.round(Number(budget.projectTokens) || 0)),
+      },
     }
     app.modal = null
   }
@@ -178,6 +183,16 @@
             Editor
             <span class="help">Comando que recebe a pasta do projeto no fim, como <code>code</code> ou <code>cursor</code>.</span>
             <input bind:value={draft.editor} placeholder="code" spellcheck="false" />
+          </label>
+          <label class="field">
+            Limite diário de tokens por chat
+            <span class="help">Entrada + saída no dia, lidos dos logs do Claude. Passou: aviso e a fila do chat pausa. 0 = sem limite.</span>
+            <input type="number" min="0" step="100000" bind:value={budget.chatTokens} />
+          </label>
+          <label class="field">
+            Limite diário de tokens por projeto
+            <span class="help">Soma dos chats do projeto. Passou: aviso e as filas do projeto pausam. 0 = sem limite.</span>
+            <input type="number" min="0" step="1000000" bind:value={budget.projectTokens} />
           </label>
         </div>
       {:else if section === 'agentes'}

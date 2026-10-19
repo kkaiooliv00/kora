@@ -7,7 +7,7 @@ import { dismiss, toast } from './toasts.svelte'
 import type { Queue } from './queue'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare'
 
 export interface Profile {
   id: string
@@ -34,6 +34,18 @@ export interface Group {
   id: string
   name: string
   projectId: string
+  /** Grupo criado por "comparar agentes": o prompt que todos receberam. */
+  compare?: string
+}
+
+export type TaskColumn = 'todo' | 'doing' | 'review' | 'done'
+/** Cartão do quadro de tarefas; ao ir para "em andamento" vira um chat com o texto como prompt. */
+export interface Task {
+  id: string
+  projectId: string
+  text: string
+  column: TaskColumn
+  chatId?: string
 }
 export interface Chat {
   id: string
@@ -71,6 +83,8 @@ export interface Settings {
   snippets: Snippet[]
   /** Regras passadas ao Claude Code de cada chat. */
   permissions: Permissions
+  /** Limite diário de tokens (entrada + saída); 0 = sem limite. Passou: aviso e fila pausada. */
+  budget: { chatTokens: number; projectTokens: number }
 }
 /** Do hook do Claude: plano (TodoWrite), pedido de permissão em aberto e uso de contexto. */
 export interface AgentInfo {
@@ -88,6 +102,8 @@ export interface HookDetail {
   context?: { tokens: number; model: string }
   /** Arquivo que o agente editou (Edit/Write). */
   file?: string
+  /** O Kora criou um ponto de restauração antes deste prompt. */
+  checkpoint?: boolean
 }
 
 /** Uma aba com um ou mais chats lado a lado. */
@@ -129,6 +145,7 @@ const DEFAULT_SETTINGS: Settings = {
   editor: 'code',
   keys: DEFAULT_KEYS,
   permissions: DEFAULT_PERMISSIONS,
+  budget: { chatTokens: 0, projectTokens: 0 },
   snippets: [
     { name: 'Revisar mudanças', text: 'Revise as mudanças não commitadas e aponte bugs e riscos.' },
     {
@@ -148,6 +165,7 @@ export const app = $state({
   projects: [] as Project[],
   groups: [] as Group[],
   chats: [] as Chat[],
+  tasks: [] as Task[],
   tabs: [] as Tab[],
   /** Projetos e grupos recolhidos na barra lateral. */
   collapsed: {} as Record<string, boolean>,
@@ -159,6 +177,10 @@ export const app = $state({
   touched: {} as Record<string, string[]>,
   /** Projeto aberto no modal de configuração. */
   editingProject: null as string | null,
+  /** Muda quando um chat ganha ponto de restauração (o painel recarrega a lista). */
+  checkpointRev: {} as Record<string, number>,
+  /** Grupo mostrado na página de comparação. */
+  comparing: null as string | null,
   /** Prompts esperando o agente ficar pronto, por chat. */
   queue: {} as Record<string, Queue>,
   modal: null as Modal | null,
@@ -178,7 +200,7 @@ export const app = $state({
   pendingPrompt: {} as Record<string, string>,
 })
 
-const uid = () => crypto.randomUUID()
+export const uid = () => crypto.randomUUID()
 
 export function fail(context: string, e: unknown) {
   toast({ tone: 'danger', title: context, text: e instanceof Error ? e.message : String(e) })
@@ -203,9 +225,11 @@ export async function load(): Promise<boolean> {
       ...config?.settings,
       keys: { ...DEFAULT_KEYS, ...config?.settings?.keys },
       permissions: { ...DEFAULT_PERMISSIONS, ...config?.settings?.permissions },
+      budget: { ...DEFAULT_SETTINGS.budget, ...config?.settings?.budget },
     })
     app.projects = state?.projects ?? []
     app.groups = state?.groups ?? []
+    app.tasks = state?.tasks ?? []
     app.chats = (state?.chats ?? []).map((c) => (legacyGemini && c.profileId === 'gemini' ? { ...c, profileId: 'agy' } : c))
     restoreTabs(state ?? {})
     return true
@@ -232,6 +256,7 @@ export interface SavedState {
   projects: Project[]
   groups: Group[]
   chats: Chat[]
+  tasks: Task[]
   tabs: Tab[]
   activeTab: string | null
   active: string | null
@@ -242,6 +267,7 @@ export const savedState = (): SavedState => ({
   projects: app.projects,
   groups: app.groups,
   chats: app.chats,
+  tasks: app.tasks,
   tabs: app.tabs,
   activeTab: app.activeTab,
   active: app.active,

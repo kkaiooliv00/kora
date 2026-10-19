@@ -4,9 +4,14 @@ use std::{fs, path::Path, process::Command};
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn git(dir: &str, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git(dir: &str, args: &[&str]) -> Result<String, String> {
+    git_env(dir, args, &[])
+}
+
+/// `git` com variáveis de ambiente extras (ex.: `GIT_INDEX_FILE` do ponto de restauração).
+pub(crate) fn git_env(dir: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(dir).args(args);
+    cmd.arg("-C").arg(dir).args(args).envs(envs.iter().copied());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

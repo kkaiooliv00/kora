@@ -55,6 +55,15 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   usage: { label: 'Uso de tokens', run: () => (app.modal = 'usage') },
   panel: { label: 'Mostrar ou esconder o painel do agente', run: () => (app.showPanel = !app.showPanel) },
   settings: { label: 'Configurações', run: () => (app.modal = 'settings') },
+  agents: { label: 'Painel de todos os agentes', run: () => (app.modal = 'agents') },
+  board: { label: 'Quadro de tarefas', run: () => (app.modal = 'board') },
+  compare: {
+    label: 'Comparar agentes: mesmo prompt em vários',
+    run: () => {
+      app.comparing = null
+      app.modal = 'compare'
+    },
+  },
 }
 
 function actionCommands(): Command[] {

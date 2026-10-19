@@ -130,6 +130,8 @@ mod tests {
         assert!(is_safe_relative("config/.env.local"));
         assert!(!is_safe_relative("../segredo"));
         assert!(!is_safe_relative("/etc/passwd"));
+        // No Linux `C:\...` é só um nome de arquivo (relativo e inofensivo).
+        #[cfg(windows)]
         assert!(!is_safe_relative(r"C:\Windows\x"));
         assert!(!is_safe_relative(""));
     }

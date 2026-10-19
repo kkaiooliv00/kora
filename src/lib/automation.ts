@@ -18,6 +18,7 @@ import {
 import { terminals } from './terminals'
 import { splitCommand } from './command'
 import { onQueueStatus } from './queue'
+import { onTaskStatus } from './work'
 import { toast } from './toasts.svelte'
 
 export function setStatus(id: string, status: Status) {
@@ -25,6 +26,7 @@ export function setStatus(id: string, status: Status) {
   if (previous === status) return
   app.status[id] = status
   onQueueStatus(id, previous, status)
+  onTaskStatus(id, previous, status)
 }
 
 export { broadcast, enqueue, dequeue } from './queue'
@@ -73,6 +75,7 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   updateAgentInfo(id, status, detail)
   if (!chat) return
   if (detail?.file) noteTouched(chat, detail.file)
+  if (detail?.checkpoint) app.checkpointRev[id] = (app.checkpointRev[id] ?? 0) + 1
   const finished = status === 'idle' && previous === 'running'
   // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
   if (!document.hasFocus()) {

@@ -8,6 +8,8 @@ export interface TerminalHandle {
   keys(data: string): void
   /** Últimas `lines` linhas da tela, em texto puro. */
   read(lines: number): string
+  /** Id do PTY no backend (medidor de CPU/memória); vazio enquanto o processo não abriu. */
+  pty(): number | undefined
 }
 
 /** Terminais montados, por id do chat. Cada Terminal.svelte se registra ao montar. */

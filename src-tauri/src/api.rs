@@ -110,6 +110,14 @@ fn session_id(body: &str) -> Option<String> {
     value.get("session_id")?.as_str().filter(|s| is_valid_id(s)).map(String::from)
 }
 
+/// Ponto de restauração na pasta do hook (`cwd`), com o começo do prompt como rótulo.
+fn checkpoint_before_prompt(chat: &str, body: &str) -> bool {
+    let Ok(hook) = serde_json::from_str::<Value>(body) else { return false };
+    let Some(cwd) = hook.get("cwd").and_then(Value::as_str) else { return false };
+    let prompt = hook.get("prompt").and_then(Value::as_str).unwrap_or_default();
+    crate::checkpoint::create(cwd, chat, prompt).unwrap_or(false)
+}
+
 fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
     let Some(route) = route(req.url(), token) else {
         let _ = req.respond(Response::empty(403u16));
@@ -129,7 +137,13 @@ fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
     match route {
         Route::Status { chat, state } => {
             let session = session_id(&body);
-            let detail = crate::hooks::detail(&body);
+            let mut detail = crate::hooks::detail(&body);
+            // Antes de responder: o Claude espera o hook, então o ponto pega a pasta antes de qualquer edição.
+            if let Some(d) = detail.as_mut().filter(|d| d["event"] == "UserPromptSubmit") {
+                if checkpoint_before_prompt(&chat, &body) {
+                    d["checkpoint"] = Value::Bool(true);
+                }
+            }
             let _ = app.emit("chat-status", StatusEvent { chat, state, session, detail });
             let _ = req.respond(Response::empty(204u16));
         }

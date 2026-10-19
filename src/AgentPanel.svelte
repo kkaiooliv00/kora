@@ -1,14 +1,12 @@
 <script lang="ts">
-  import { app, chatById } from './lib/state.svelte'
+  import { invoke } from '@tauri-apps/api/core'
+  import { ask } from '@tauri-apps/plugin-dialog'
+  import { app, chatById, chatDir, fail } from './lib/state.svelte'
+  import { toast } from './lib/toasts.svelte'
   import { CATEGORIES, type Policy } from './lib/permissions'
   import EmptyState from './EmptyState.svelte'
   import { sharedWith } from './lib/automation'
-
-  // Janela de contexto padrão do Claude; 1M na variante [1m], acima de 200k ou nos Opus que já vêm com 1M.
-  // ponytail: tabela por nome de modelo; o tamanho exato só chega no JSON da statusline, que é do usuário.
-  const DEFAULT_WINDOW = 200_000
-  const LARGE_WINDOW = 1_000_000
-  const LARGE_BY_DEFAULT = /\[1m\]|opus-(4-[6-9]|[5-9])/
+  import { contextPercent, contextWindow, formatMemory, procStats } from './lib/stats.svelte'
 
   const POLICY: Record<Policy, { text: string; tone: string }> = {
     allow: { text: '✓ sempre', tone: 'success' },
@@ -20,11 +18,52 @@
   const chat = $derived(app.active ? chatById(app.active) : undefined)
   const isClaude = $derived(app.profiles.find((p) => p.id === chat?.profileId)?.hooks === 'claude')
   const info = $derived(app.active ? app.agentInfo[app.active] : undefined)
-  const contextWindow = $derived(
-    info?.context && (info.context.tokens > DEFAULT_WINDOW || LARGE_BY_DEFAULT.test(info.context.model)) ? LARGE_WINDOW : DEFAULT_WINDOW,
-  )
-  const contextPct = $derived(info?.context ? Math.min(100, Math.round((info.context.tokens / contextWindow) * 100)) : 0)
+  const windowSize = $derived(contextWindow(info))
+  const contextPct = $derived(contextPercent(info) ?? 0)
+  const proc = $derived(app.active ? procStats[app.active] : undefined)
   const touched = $derived(app.active ? (app.touched[app.active] ?? []) : [])
+  const CHECKPOINTS_SHOWN = 8
+  type Checkpoint = { ref: string; time: number; label: string }
+  let checkpoints = $state<Checkpoint[]>([])
+  let restoring = $state('')
+  const clock = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const dated = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const when = (t: number) => (new Date(t).toDateString() === new Date().toDateString() ? clock : dated).format(t)
+
+  // Recarrega quando muda o chat em foco ou ele ganha um ponto novo (hook antes do prompt).
+  $effect(() => {
+    const id = app.active
+    void (id && app.checkpointRev[id])
+    const dir = chat && isClaude ? chatDir(chat) : undefined
+    if (!id || !dir) {
+      checkpoints = []
+      return
+    }
+    invoke<Checkpoint[]>('checkpoints', { dir, chat: id })
+      .then((list) => app.active === id && (checkpoints = list))
+      .catch(() => (checkpoints = []))
+  })
+
+  async function restore(cp: Checkpoint) {
+    const dir = chat && chatDir(chat)
+    if (!chat || !dir) return
+    const ok = await ask(`Voltar os arquivos de ${chat.name} para antes de "${cp.label}"? O estado atual vira outro ponto, então dá para desfazer.`, {
+      title: 'Restaurar ponto',
+      kind: 'warning',
+    })
+    if (!ok) return
+    restoring = cp.ref
+    try {
+      await invoke('restore_checkpoint', { dir, chat: chat.id, reference: cp.ref })
+      app.checkpointRev[chat.id] = (app.checkpointRev[chat.id] ?? 0) + 1
+      toast({ tone: 'success', title: 'Arquivos restaurados', text: `Estado de antes de "${cp.label}".` })
+    } catch (e) {
+      fail('Não foi possível restaurar', e)
+    } finally {
+      restoring = ''
+    }
+  }
+
   const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
 </script>
 
@@ -88,17 +127,41 @@
     </section>
 
     <section>
+      <p class="overline">pontos de restauração</p>
+      {#if checkpoints.length}
+        <ul class="checkpoints">
+          {#each checkpoints.slice(0, CHECKPOINTS_SHOWN) as cp (cp.ref)}
+            <li>
+              <span class="time">{when(cp.time)}</span>
+              <span class="label" title={cp.label}>{cp.label}</span>
+              <button class="link" disabled={!!restoring} onclick={() => restore(cp)}>{restoring === cp.ref ? 'voltando…' : 'voltar aqui'}</button>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <EmptyState kind="empty" title="Nenhum ponto ainda" compact>Antes de cada prompt o Kora guarda o estado dos arquivos, para você desfazer o que o agente fez.</EmptyState>
+      {/if}
+    </section>
+
+    <section>
       <p class="overline">contexto</p>
       {#if info?.context}
         <div class="meter" role="meter" aria-valuenow={contextPct} aria-valuemin={0} aria-valuemax={100} aria-label="Contexto usado">
           <div style:width="{contextPct}%"></div>
         </div>
         <p class="muted">
-          {contextPct}% da janela de contexto usada ({compact.format(info.context.tokens)} de {compact.format(contextWindow)} tokens)
+          {contextPct}% da janela de contexto usada ({compact.format(info.context.tokens)} de {compact.format(windowSize)} tokens)
         </p>
       {:else}
         <EmptyState kind="empty" title="Sem dados de contexto" compact>Aparece depois da primeira resposta do agente.</EmptyState>
       {/if}
+    </section>
+  {/if}
+
+  {#if chat && proc}
+    <section>
+      <p class="overline">processo</p>
+      <p class="muted mono-line">{proc.cpu.toFixed(1)}% CPU · {formatMemory(proc.memory)}</p>
     </section>
   {/if}
 </aside>
@@ -165,6 +228,31 @@
     color: var(--accent);
     text-decoration: underline;
     text-underline-offset: 2px;
+  }
+  .checkpoints li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .checkpoints .time {
+    flex: none;
+    font: 11px var(--font-mono);
+    color: var(--ink-muted);
+  }
+  .checkpoints .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .checkpoints .link {
+    flex: none;
+  }
+  .mono-line {
+    font-family: var(--font-mono);
   }
   .files li {
     display: flex;

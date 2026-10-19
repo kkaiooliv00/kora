@@ -172,7 +172,20 @@
       else projectMenu(e, project)
       return
     }
+    const compare = app.groups.find((g) => g.id === groupId)?.compare
     openMenu(e, [
+      ...(compare
+        ? [
+            {
+              label: 'Ver comparação',
+              run: () => {
+                app.comparing = groupId
+                app.modal = 'compare'
+              },
+            },
+            { separator: true },
+          ]
+        : []),
       { label: 'Novo chat no grupo', submenu: newChatItems(project.id, groupId) },
       { label: 'Renomear grupo', run: () => (renaming = groupId) },
       { separator: true },

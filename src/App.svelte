@@ -19,6 +19,9 @@
   import Diff from './Diff.svelte'
   import Usage from './Usage.svelte'
   import ProjectSettings from './ProjectSettings.svelte'
+  import Agents from './Agents.svelte'
+  import Board from './Board.svelte'
+  import Compare from './Compare.svelte'
   import Play from '@lucide/svelte/icons/play'
   import Kbd from './Kbd.svelte'
   import ToastStack from './ToastStack.svelte'
@@ -51,6 +54,8 @@
   import { ACTIONS, openPalette } from './lib/commands'
   import { menuState } from './lib/menu.svelte'
   import { themeOf } from './lib/themes'
+  import { watchStats } from './lib/stats.svelte'
+  import { watchBudget } from './lib/budget'
   import { comboOf, normalizeCombo } from './lib/keys'
 
   const SAVE_DELAY_MS = 300
@@ -89,7 +94,11 @@
       listen<CliRequest>('kora-cli', ({ payload }) => handleCli(payload)),
     ]
     window.addEventListener('keydown', onKey, true)
+    const stopStats = watchStats()
+    const stopBudget = watchBudget()
     return () => {
+      stopStats()
+      stopBudget()
       window.removeEventListener('keydown', onKey, true)
       listeners.forEach((unlisten) => unlisten.then((stop) => stop()))
     }
@@ -303,6 +312,9 @@
   {#if app.modal === 'diff'}<Diff />{/if}
   {#if app.modal === 'usage'}<Usage />{/if}
   {#if app.modal === 'project'}<ProjectSettings />{/if}
+  {#if app.modal === 'agents'}<Agents />{/if}
+  {#if app.modal === 'board'}<Board />{/if}
+  {#if app.modal === 'compare'}<Compare />{/if}
 
   <ToastStack />
   <Menu />

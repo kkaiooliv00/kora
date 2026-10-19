@@ -22,6 +22,8 @@ struct Pty {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Processo raiz do terminal (o agente ou o shell); base do medidor de CPU/memória.
+    pid: Option<u32>,
 }
 
 #[derive(Default)]
@@ -149,7 +151,7 @@ pub fn pty_spawn(
 
     state.map.lock().unwrap().insert(
         id,
-        Pty { master: pair.master, writer, killer: child.clone_killer() },
+        Pty { master: pair.master, writer, killer: child.clone_killer(), pid: child.process_id() },
     );
 
     thread::spawn(move || {
@@ -199,6 +201,12 @@ pub fn pty_kill(state: State<Ptys>, id: u32) -> Result<(), String> {
     }
 }
 
+/// PIDs dos terminais pedidos (id do Kora → pid do processo raiz).
+pub fn pids(state: &Ptys, ids: &[u32]) -> Vec<(u32, u32)> {
+    let map = state.map.lock().unwrap();
+    ids.iter().filter_map(|id| Some((*id, map.get(id)?.pid?))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::find_executable;
@@ -224,3 +232,4 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 }
+
