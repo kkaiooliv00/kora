@@ -7,7 +7,7 @@
   import { SearchAddon } from '@xterm/addon-search'
   import { invoke, Channel } from '@tauri-apps/api/core'
   import '@xterm/xterm/css/xterm.css'
-  import { app, chatDir, fail, focusChat, openChat, updateChat, type Chat } from './lib/state.svelte'
+  import { app, chatById, chatDir, fail, focusChat, openChat, updateChat, type Chat } from './lib/state.svelte'
   import { toast } from './lib/toasts.svelte'
   import EmptyState from './EmptyState.svelte'
   import { clearPermission, noteHumanInput, setStatus } from './lib/automation'
@@ -78,6 +78,14 @@
   }
 
   /** Ctrl+V vira paste do navegador (texto e imagem); Ctrl+C com seleção copia. */
+  const TITLE_MAX = 60
+
+  /** "✳ Migrar config para TOML" → "Migrar config para TOML"; o título padrão ("Claude Code") não conta. */
+  function sessionTitle(raw: string): string {
+    const title = raw.replace(/^[^\p{L}\p{N}]+/u, '').trim().slice(0, TITLE_MAX)
+    return /^claude( code)?$/i.test(title) ? '' : title
+  }
+
   function clipboardKeys(t: Terminal) {
     return (e: KeyboardEvent) => {
       if (e.type !== 'keydown' || !e.ctrlKey || e.altKey) return true
@@ -274,6 +282,14 @@
         start()
       }
     })
+    // O Claude Code publica o título da sessão no terminal (com um glifo de status na frente).
+    if (profile?.hooks === 'claude') {
+      t.onTitleChange((title) => {
+        const name = sessionTitle(title)
+        const current = chatById(chat.id)
+        if (name && current && !current.namedByUser && current.name !== name) updateChat(chat.id, { name })
+      })
+    }
     t.onResize(({ cols, rows }) => id !== undefined && invoke('pty_resize', { id, cols, rows }))
 
     terminals.set(chat.id, {

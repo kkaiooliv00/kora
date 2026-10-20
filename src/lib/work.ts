@@ -1,4 +1,4 @@
-import { app, addChat, chatById, renameChat, uid, type Status, type TaskColumn } from './state.svelte'
+import { app, addChat, chatById, updateChat, uid, type Status, type TaskColumn } from './state.svelte'
 
 const NAME_MAX = 40
 const shortName = (text: string) => {
@@ -32,7 +32,8 @@ export async function moveTask(id: string, column: TaskColumn, profileId: string
       starting.delete(id)
     }
     if (!chatId) return
-    renameChat(chatId, shortName(task.text))
+    // Nome provisório: o título da sessão do Claude assume quando chegar.
+    updateChat(chatId, { name: shortName(task.text) })
     app.pendingPrompt[chatId] = task.text
   }
   app.tasks = app.tasks.map((t) => (t.id === id ? { ...t, column, chatId } : t))

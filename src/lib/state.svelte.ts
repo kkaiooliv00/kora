@@ -60,6 +60,8 @@ export interface Chat {
   runOf?: string
   /** Fora da barra lateral (fica em "chats arquivados"); a conversa e o worktree continuam. */
   archived?: boolean
+  /** Você renomeou: o título da sessão do Claude não sobrescreve mais o nome. */
+  namedByUser?: boolean
   /** Sessão do Claude, para retomar a conversa ao reabrir. */
   sessionId?: string
   /** Última vez aberto (ms), para a lista de recentes. */
@@ -441,7 +443,7 @@ export async function archiveChat(id: string, archived: boolean) {
 }
 
 export function renameChat(id: string, name: string) {
-  if (name.trim()) app.chats = app.chats.map((c) => (c.id === id ? { ...c, name: name.trim() } : c))
+  if (name.trim()) app.chats = app.chats.map((c) => (c.id === id ? { ...c, name: name.trim(), namedByUser: true } : c))
 }
 
 export function moveChat(id: string, projectId: string, groupId?: string) {
