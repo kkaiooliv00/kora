@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import { closeMenu, menuState, type MenuItem } from './lib/menu.svelte'
 
@@ -31,10 +32,27 @@
       closeMenu()
       return
     }
+    const active = document.activeElement as HTMLElement | null
+    const inSub = active?.closest('.sub')
+    // → entra no submenu do item; ← volta para o item pai.
+    if (e.key === 'ArrowRight' && !inSub && active?.getAttribute('aria-haspopup')) {
+      e.preventDefault()
+      openSub = Number(active.dataset.index)
+      tick().then(() => active.parentElement?.querySelector<HTMLButtonElement>('.sub button:not(:disabled)')?.focus())
+      return
+    }
+    if (e.key === 'ArrowLeft' && inSub) {
+      e.preventDefault()
+      const parent = inSub.parentElement?.querySelector<HTMLButtonElement>(':scope > button')
+      openSub = null
+      parent?.focus()
+      return
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
     e.preventDefault()
-    const buttons = [...(menu?.querySelectorAll<HTMLButtonElement>('.top > button:not(:disabled)') ?? [])]
-    const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    const scope = inSub ?? menu
+    const buttons = [...(scope?.querySelectorAll<HTMLButtonElement>(':scope > .slot > button:not(:disabled)') ?? [])]
+    const index = buttons.indexOf(active as HTMLButtonElement)
     const next = e.key === 'ArrowDown' ? index + 1 : index - 1
     buttons[(next + buttons.length) % buttons.length]?.focus()
   }
@@ -47,8 +65,11 @@
     {#if item.separator}
       <div class="sep" role="separator"></div>
     {:else}
+      <!-- O submenu fica dentro do item: abre ao lado dele, não no topo do menu. -->
+      <div class="slot">
       <button
         class="item"
+        data-index={i}
         class:danger={item.danger}
         class:open={!nested && openSub === i}
         disabled={item.disabled}
@@ -70,6 +91,7 @@
           {/if}
         </div>
       {/if}
+      </div>
     {/if}
   {/each}
 {/snippet}
@@ -91,9 +113,16 @@
     box-shadow: var(--shadow-pop);
     z-index: 40;
   }
+  .slot {
+    position: relative;
+  }
+  .slot > .item {
+    width: 100%;
+  }
   .sub {
     position: absolute;
-    left: calc(100% - 4px);
+    top: -4px;
+    left: calc(100% + 2px);
     min-width: 200px;
   }
   .item {

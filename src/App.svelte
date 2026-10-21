@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import Plus from '@lucide/svelte/icons/plus'
   import X from '@lucide/svelte/icons/x'
   import Columns2 from '@lucide/svelte/icons/columns-2'
+  import SplitIcon from '@lucide/svelte/icons/square-split-horizontal'
   import Rows2 from '@lucide/svelte/icons/rows-2'
   import Maximize from '@lucide/svelte/icons/maximize-2'
   import PanelRight from '@lucide/svelte/icons/panel-right'
@@ -40,8 +41,8 @@
     chatDir,
     whereOf,
     focusChat,
-    closePane,
-    closeTab,
+    requestClosePane,
+    requestCloseTab,
     popOut,
     runProject,
     toggleDirection,
@@ -71,6 +72,10 @@
   const hasTab = $derived(app.tabs.some((t) => t.id === app.activeTab))
   const goHome = () => (app.activeTab = null)
 
+  /** Ações que agem no chat em foco (não valem na tela inicial nem por trás de um modal). */
+  const CHAT_ACTIONS = new Set(['search', 'split', 'closePane', 'queue', 'diff', 'prevPrompt', 'nextPrompt'])
+  const REPEATABLE = new Set(['nextTab', 'prevTab', 'prevPrompt', 'nextPrompt'])
+
   /** Atalhos globais: rodam antes do terminal receber a tecla. */
   function onKey(e: KeyboardEvent) {
     // Esc fecha qualquer modal aqui, na captura: se o foco estiver no terminal, o xterm engoliria a tecla.
@@ -85,6 +90,9 @@
     if (!action || !ACTIONS[action]) return
     e.preventDefault()
     e.stopPropagation()
+    if (e.repeat && !REPEATABLE.has(action)) return
+    if (app.modal && app.modal !== 'palette' && CHAT_ACTIONS.has(action)) return
+    if (!hasTab && CHAT_ACTIONS.has(action)) return
     ACTIONS[action].run()
   }
 
@@ -101,12 +109,14 @@
       listen<string>('chat-checkpoint', ({ payload }) => (app.checkpointRev[payload] = (app.checkpointRev[payload] ?? 0) + 1)),
     ]
     window.addEventListener('keydown', onKey, true)
+    window.addEventListener('focusin', keepFocusInModal)
     const stopStats = watchStats()
     const stopBudget = watchBudget()
     return () => {
       stopStats()
       stopBudget()
       window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('focusin', keepFocusInModal)
       listeners.forEach((unlisten) => unlisten.then((stop) => stop()))
     }
   })
@@ -135,7 +145,7 @@
 
   const activeChat = $derived(app.active ? chatById(app.active) : undefined)
   // Sem chat aberto (boas-vindas) o painel não tem o que mostrar.
-  const showPanel = $derived(app.showPanel && app.tabs.length > 0)
+  const showPanel = $derived(app.showPanel && hasTab)
   const activeDir = $derived(activeChat ? chatDir(activeChat) : undefined)
   const activeProfile = $derived(activeChat ? app.profiles.find((p) => p.id === activeChat.profileId) : undefined)
   const activeStatus = $derived(app.active ? app.status[app.active] : undefined)
@@ -214,6 +224,32 @@
     return tab.vertical ? `top:${at}%` : `left:${at}%`
   }
 
+  // Modal aberto: o teclado vai para ele, nunca para o terminal de trás (um "y" aprovaria um pedido do agente).
+  const FIELD_SELECTOR = '[autofocus], input:not([type=checkbox]):not([type=radio]):not([disabled]), textarea, select'
+  const dialogEl = () => document.querySelector<HTMLElement>('[role=dialog]')
+  $effect(() => {
+    if (!app.modal) return
+    tick().then(() => {
+      const dialog = dialogEl()
+      if (!dialog || dialog.contains(document.activeElement)) return
+      ;(document.activeElement as HTMLElement | null)?.blur()
+      const target = dialog.querySelector<HTMLElement>(FIELD_SELECTOR) ?? dialog.querySelector<HTMLElement>('button')
+      target?.focus()
+    })
+  })
+  /** Foco que escapa do modal (Tab, clique atrás) volta para dentro dele. */
+  function keepFocusInModal(e: FocusEvent) {
+    const dialog = app.modal ? dialogEl() : null
+    if (!dialog || menuState.open || dialog.contains(e.target as Node)) return
+    dialog.querySelector<HTMLElement>(FIELD_SELECTOR)?.focus() ?? dialog.querySelector<HTMLElement>('button')?.focus()
+  }
+
+  let tabsEl = $state<HTMLElement>()
+  $effect(() => {
+    void app.activeTab
+    tabsEl?.querySelector('.tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  })
+
   const comboKeys = (combo: string | undefined) => (combo ? normalizeCombo(combo).split('+') : [])
 </script>
 
@@ -227,7 +263,7 @@
     <button class="icon-btn glyph" class:on={!hasTab} title="Início" aria-label="Início" onclick={goHome}>
       <img src={glyph} alt="" width="18" height="18" />
     </button>
-    <nav class="tabs" aria-label="Sessões abertas">
+    <nav class="tabs" aria-label="Sessões abertas" bind:this={tabsEl} onwheel={(e) => tabsEl && (tabsEl.scrollLeft += e.deltaY)}>
       {#each app.tabs as tab (tab.id)}
         {@const active = app.activeTab === tab.id}
         <div class="tab" class:active>
@@ -248,7 +284,7 @@
               {#if tab.vertical}<Columns2 size={14} strokeWidth={1.5} />{:else}<Rows2 size={14} strokeWidth={1.5} />{/if}
             </button>
           {/if}
-          <button class="icon-btn" title="Fechar (encerra os processos)" aria-label="Fechar aba" onclick={() => closeTab(tab.id)}>
+          <button class="icon-btn" title="Fechar (encerra os processos)" aria-label="Fechar aba" onclick={() => requestCloseTab(tab.id)}>
             <X size={14} strokeWidth={1.5} />
           </button>
         </div>
@@ -329,12 +365,12 @@
                 </button>
               {/if}
               <button class="icon-btn" title="Dividir com outro chat" aria-label="Dividir com outro chat" onclick={() => { focusChat(chat.id); openPalette('Dividir com ') }}>
-                <Columns2 size={14} strokeWidth={1.5} />
+                <SplitIcon size={14} strokeWidth={1.5} />
               </button>
               <button class="icon-btn" title="Maximizar em aba própria" aria-label="Maximizar em aba própria" onclick={() => popOut(chat.id)}>
                 <Maximize size={14} strokeWidth={1.5} />
               </button>
-              <button class="icon-btn" title="Fechar (encerra o processo)" aria-label="Fechar" onclick={() => closePane(chat.id)}>
+              <button class="icon-btn" title="Fechar (encerra o processo)" aria-label="Fechar" onclick={() => requestClosePane(chat.id)}>
                 <X size={14} strokeWidth={1.5} />
               </button>
             </header>
@@ -419,6 +455,18 @@
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
+    /* Some nas bordas quando há abas fora da vista. */
+    mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 24px), transparent);
+  }
+  /* Painel estreito: os botões ficam; caminho e texto do status saem. */
+  @container (max-width: 380px) {
+    .pane header .where,
+    .pane header .badge {
+      display: none;
+    }
+  }
+  .pane header .icon-btn {
+    flex: none;
   }
   .tab {
     display: flex;
@@ -563,13 +611,19 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    overflow: hidden;
+    container-type: inline-size;
     height: 36px;
     padding: 0 var(--space-2) 0 var(--space-3);
     border-bottom: 1px solid var(--line);
     background: var(--bg-100);
   }
   .pane header .name {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     max-width: 40%;
     font: 600 13px var(--font-mono);
     color: var(--ink);

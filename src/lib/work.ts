@@ -42,7 +42,7 @@ export async function moveTask(id: string, column: TaskColumn, profileId: string
 /** O agente da tarefa terminou de responder: a tarefa vai para revisão. */
 export function onTaskStatus(chatId: string, previous: Status | undefined, status: Status) {
   // Enquanto o prompt da tarefa não foi enviado, o idle é só o agente abrindo.
-  if (previous !== 'running' || status !== 'idle' || app.pendingPrompt[chatId]) return
+  if ((previous !== 'running' && previous !== 'waiting') || status !== 'idle' || app.pendingPrompt[chatId]) return
   app.tasks = app.tasks.map((t) => (t.chatId === chatId && t.column === 'doing' ? { ...t, column: 'review' } : t))
 }
 

@@ -37,6 +37,18 @@
   import Settings from '@lucide/svelte/icons/settings'
 
   const ICON = { size: 16, strokeWidth: 1.5 }
+  // O clique abre o chat e o terminal pega o foco no quadro seguinte; o campo de renomear vem depois disso.
+  const RENAME_AFTER_OPEN_MS = 120
+
+  /** "1 aguardando você · 2 prontos · 1 fechado" para o título do resumo. */
+  function summaryTitle(chats: Chat[]): string {
+    const counts = new Map<string, number>()
+    for (const c of chats) {
+      const label = app.status[c.id] ? STATUS[app.status[c.id]].label : 'fechado'
+      counts.set(label, (counts.get(label) ?? 0) + 1)
+    }
+    return [...counts].map(([label, n]) => `${n} ${label}`).join(' · ')
+  }
   const TICK_MS = 30_000
 
   type Adding = { kind: 'chat' | 'group'; projectId: string; groupId?: string }
@@ -112,7 +124,14 @@
     dragged = null
   }
 
+  let renameCancelled = false
+
   function finishRename(id: string, value: string, kind: 'chat' | 'group') {
+    if (renameCancelled) {
+      renameCancelled = false
+      renaming = null
+      return
+    }
     if (kind === 'chat') renameChat(id, value)
     else renameGroup(id, value)
     renaming = null
@@ -220,7 +239,10 @@
     onblur={(e) => finishRename(id, e.currentTarget.value, kind)}
     onkeydown={(e) => {
       if (e.key === 'Enter') e.currentTarget.blur()
-      if (e.key === 'Escape') renaming = null
+      if (e.key === 'Escape') {
+        renameCancelled = true
+        renaming = null
+      }
     }}
   />
 {/snippet}
@@ -266,7 +288,7 @@
         draggable="true"
         ondragstart={() => (dragged = chat.id)}
         onclick={(e) => (e.altKey ? splitChat(chat.id) : openChat(chat.id))}
-        ondblclick={() => (renaming = chat.id)}
+        ondblclick={() => setTimeout(() => (renaming = chat.id), RENAME_AFTER_OPEN_MS)}
         oncontextmenu={(e) => chatMenu(e, chat)}
         onkeydown={(e) => onChatKey(e, chat)}
         title={`${status ? STATUS[status].label : 'fechado'} · Alt+clique abre ao lado · botão direito para mais`}
@@ -330,9 +352,9 @@
           {/if}
           {#if !selected && view.chats.length > 1}
             {@const { glyphs, rest } = summary(statusesOf(view.chats))}
-            <span class="summary" aria-label="Resumo dos chats">
+            <span class="summary" aria-label="Resumo dos chats" title={summaryTitle(view.chats)}>
               {#each glyphs as s (s)}<span style:color={STATUS[s].color} aria-label={STATUS[s].label}>{STATUS[s].glyph}</span>{/each}
-              {#if rest}<span class="rest">+{rest}</span>{/if}
+              {#if rest}<span class="rest">+{rest} {rest === 1 ? 'chat' : 'chats'}</span>{/if}
             </span>
           {/if}
         </button>
@@ -648,6 +670,7 @@
   }
   .chat.active {
     background: var(--bg-300);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
   .chat-btn {
     display: flex;

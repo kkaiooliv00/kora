@@ -2,7 +2,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import { app, openChat, whereOf, STATUS, type Chat } from './lib/state.svelte'
   import { terminals } from './lib/terminals'
-  import { contextPercent, formatMemory, procStats } from './lib/stats.svelte'
+  import { contextPercent, formatMemory, percent, procStats } from './lib/stats.svelte'
   import EmptyState from './EmptyState.svelte'
 
   /** Todos os chats abertos numa grade: status, últimas linhas, contexto, CPU/memória. */
@@ -60,7 +60,7 @@
             <pre class="preview">{preview(chat) || ' '}</pre>
             <span class="meta">
               {#if ctx !== undefined}<span title="janela de contexto usada">ctx {ctx}%</span>{/if}
-              {#if proc}<span title="CPU e memória do agente e dos processos filhos">{proc.cpu.toFixed(1)}% · {formatMemory(proc.memory)}</span>{/if}
+              {#if proc}<span title="CPU e memória do agente e dos processos filhos">{percent(proc.cpu)} CPU · {formatMemory(proc.memory)}</span>{/if}
               {#if edited}<span>{edited} {edited === 1 ? 'arquivo' : 'arquivos'}</span>{/if}
               {#if queued}<span class="accent">{queued} na fila</span>{/if}
             </span>

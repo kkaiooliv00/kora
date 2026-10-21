@@ -137,7 +137,9 @@
     )
     t.open(el)
     try {
-      t.loadAddon(new WebglAddon())
+      const gl = new WebglAddon()
+      gl.onContextLoss(() => gl.dispose())
+      t.loadAddon(gl)
     } catch {
       // sem WebGL: xterm usa o renderer DOM
     }
@@ -182,8 +184,13 @@
       setTimeout(() => write('\r'), SUBMIT_DELAY_MS)
     }
 
-    const onData = new Channel<ArrayBuffer>()
-    onData.onmessage = (buf) => {
+    // Cada processo ganha canais novos: o Tauri encerra o canal quando o processo sai,
+    // e reaproveitá-lo deixaria o próximo terminal mudo (Enter para reabrir, reconectar, tentar de novo).
+    let generation = 0
+    /** O que está rodando é o shell de "Abrir só o shell" (o título dele não vira nome do chat). */
+    let shellOnlyRunning = false
+
+    const handleData = (buf: ArrayBuffer) => {
       if (disposed) return
       phase = 'ready'
       t.write(new Uint8Array(buf))
@@ -197,8 +204,7 @@
       clearTimeout(idleTimer)
       idleTimer = setTimeout(() => setStatus(chat.id, 'idle'), IDLE_MS)
     }
-    const onExit = new Channel<number>()
-    onExit.onmessage = (code) => {
+    const handleExit = (code: number) => {
       if (disposed) return
       id = undefined
       stopped = true
@@ -229,6 +235,12 @@
       if (disposed) return
       stopped = false
       startedAt = Date.now()
+      shellOnlyRunning = shellOnly
+      const gen = ++generation
+      const onData = new Channel<ArrayBuffer>()
+      onData.onmessage = (buf) => gen === generation && handleData(buf)
+      const onExit = new Channel<number>()
+      onExit.onmessage = (code) => gen === generation && handleExit(code)
       phase = 'starting'
       showStarting = false
       setTimeout(() => (showStarting = phase === 'starting'), STARTING_DELAY_MS)
@@ -239,10 +251,16 @@
           return invoke<number>('pty_spawn', { chat: chat.id, program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit })
         })
         .then((pty) => {
+          // O chat fechou (ou outro start começou) enquanto o processo abria: não deixa órfão.
+          if (disposed || gen !== generation) {
+            invoke('pty_kill', { id: pty })
+            return
+          }
           id = pty
           setStatus(chat.id, 'idle')
         })
         .catch((e) => {
+          if (disposed || gen !== generation) return
           stopped = true
           phase = 'failed'
           failure = String(e)
@@ -285,6 +303,7 @@
     // O Claude Code publica o título da sessão no terminal (com um glifo de status na frente).
     if (profile?.hooks === 'claude') {
       t.onTitleChange((title) => {
+        if (shellOnlyRunning) return
         const name = sessionTitle(title)
         const current = chatById(chat.id)
         if (name && current && !current.namedByUser && current.name !== name) updateChat(chat.id, { name })
@@ -429,12 +448,13 @@
       bind:this={searchInput}
       bind:value={query}
       placeholder="Buscar no terminal"
+      aria-label="Buscar no terminal"
       oninput={() => query && search.findNext(query, { incremental: true })}
       onkeydown={onSearchKey}
     />
-    <button title="Anterior (Shift+Enter)" onclick={() => find(true)}>↑</button>
-    <button title="Próximo (Enter)" onclick={() => find()}>↓</button>
-    <button title="Fechar (Esc)" onclick={closeSearch}>×</button>
+    <button title="Anterior (Shift+Enter)" aria-label="Resultado anterior" onclick={() => find(true)}>↑</button>
+    <button title="Próximo (Enter)" aria-label="Próximo resultado" onclick={() => find()}>↓</button>
+    <button title="Fechar (Esc)" aria-label="Fechar busca" onclick={closeSearch}>×</button>
   </div>
 {/if}
 

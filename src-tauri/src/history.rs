@@ -74,12 +74,15 @@ fn session_files(root: &Path, sessions: &HashSet<String>) -> Vec<(String, PathBu
 
 fn search(root: &Path, query: &str, sessions: &HashSet<String>) -> Vec<Hit> {
     let query_lower = query.to_lowercase();
+    // A linha é JSON: `C:\dev` está gravado como `C:\\dev`. Compara com a busca escapada do mesmo jeito.
+    let escaped = serde_json::to_string(&query_lower).unwrap_or_default();
+    let escaped = escaped.trim_matches('"').to_string();
     let mut hits = Vec::new();
     for (session, path) in session_files(root, sessions) {
         let Ok(file) = File::open(&path) else { continue };
         let mut found = 0;
         for line in BufReader::new(file).lines().map_while(Result::ok) {
-            if !line.to_lowercase().contains(&query_lower) {
+            if !line.to_lowercase().contains(&escaped) {
                 continue;
             }
             let Ok(entry) = serde_json::from_str::<Value>(&line) else { continue };

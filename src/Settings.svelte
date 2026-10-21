@@ -31,7 +31,8 @@
   const preview = $derived(themeOf(draft.theme))
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
-  let keysText = $state(JSON.stringify(app.settings.keys, null, 2))
+  /** Um campo por ação; vazio = sem atalho. */
+  let keyRows = $state<Record<string, string>>(Object.fromEntries(Object.keys(ACTIONS).map((id) => [id, app.settings.keys[id] ?? ''])))
   let snippetsText = $state(JSON.stringify(app.settings.snippets, null, 2))
   let newAllowed = $state('')
   let newBlocked = $state('')
@@ -53,6 +54,8 @@
     const unknown = entries.find(([action]) => !(action in ACTIONS))
     if (unknown) throw new Error(`ação desconhecida "${unknown[0]}" (válidas: ${Object.keys(ACTIONS).join(', ')})`)
     if (!entries.every(([, combo]) => isText(combo))) throw new Error('cada atalho precisa ser texto')
+    const bare = entries.find(([, combo]) => !/(^|\+)(ctrl|alt|meta)\+/i.test(combo as string))
+    if (bare) throw new Error(`"${bare[0]}": use Ctrl, Alt ou Meta no atalho (senão a tecla some dos terminais)`)
     return parsed as Record<string, string>
   }
 
@@ -81,8 +84,14 @@
 
   function save() {
     error = ''
+    // Padrão digitado sem apertar Enter também conta.
+    addPattern('allowCommands', newAllowed)
+    addPattern('denyCommands', newBlocked)
+    newAllowed = ''
+    newBlocked = ''
     const profiles = attempt('agentes', 'Perfis', () => parseProfiles(profilesText))
-    const keys = attempt('atalhos', 'Atalhos', () => parseKeys(keysText))
+    const filled = Object.fromEntries(Object.entries(keyRows).filter(([, combo]) => combo.trim()))
+    const keys = attempt('atalhos', 'Atalhos', () => parseKeys(JSON.stringify(filled)))
     const snippets = attempt('snippets', 'Snippets', () => parseSnippets(snippetsText))
     if (!profiles || !keys || !snippets) return
     app.profiles = profiles
@@ -268,11 +277,15 @@
         </div>
       {:else if section === 'atalhos'}
         <h2>atalhos</h2>
-        <p class="lead">Ações: {Object.keys(ACTIONS).join(', ')}. Use <code>Ctrl+Shift+letra</code>: Ctrl+letra pura é dos agentes.</p>
-        <label class="field">
-          Atalhos
-          <textarea bind:value={keysText} rows="16" spellcheck="false"></textarea>
-        </label>
+        <p class="lead">Use <code>Ctrl+Shift+letra</code>: Ctrl+letra pura é dos agentes. Deixe vazio para não ter atalho.</p>
+        <div class="keys">
+          {#each Object.entries(ACTIONS) as [id, action] (id)}
+            <label class="key-row">
+              <span>{action.label}</span>
+              <input class="input mono" bind:value={keyRows[id]} placeholder="sem atalho" spellcheck="false" aria-label="Atalho de {action.label}" />
+            </label>
+          {/each}
+        </div>
       {:else if section === 'snippets'}
         <h2>snippets</h2>
         <p class="lead">Prompts prontos, colados pela paleta no chat em foco. <code>"project"</code> (nome do projeto) limita a um projeto. Campos como <code>{'{número}'}</code> no texto são perguntados antes de colar.</p>
@@ -342,7 +355,8 @@
   }
   main {
     overflow-y: auto;
-    padding: var(--space-8) 40px;
+    /* Sem respiro embaixo: o rodapé fixo encosta na borda e nada aparece por baixo dele. */
+    padding: var(--space-8) 40px 0;
   }
   main > * {
     max-width: 760px;
@@ -461,12 +475,29 @@
     margin-top: var(--space-6);
   }
   footer {
+    position: sticky;
+    bottom: 0;
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
     margin-top: var(--space-8);
-    padding-top: var(--space-4);
+    padding: var(--space-4) 0;
     border-top: 1px solid var(--line);
+    background: var(--bg-100);
+  }
+  .keys {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .key-row {
+    display: grid;
+    grid-template-columns: 1fr 220px;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
   }
   .swatches {
     display: flex;

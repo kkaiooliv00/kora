@@ -189,6 +189,8 @@ export const app = $state({
   checkpointRev: {} as Record<string, number>,
   /** Snippet com campos `{nome}` esperando os valores. */
   template: '',
+  /** Chat que pediu ▶ sem comando configurado: roda quando o projeto for salvo. */
+  pendingRun: null as string | null,
   /** Grupo mostrado na página de comparação. */
   comparing: null as string | null,
   /** Prompts esperando o agente ficar pronto, por chat. */
@@ -236,6 +238,7 @@ export async function load(): Promise<boolean> {
       ...config?.settings,
       keys: { ...DEFAULT_KEYS, ...config?.settings?.keys },
       permissions: { ...DEFAULT_PERMISSIONS, ...config?.settings?.permissions },
+      version: config?.settings?.version ?? 1,
       budget: { ...DEFAULT_SETTINGS.budget, ...config?.settings?.budget },
     })
     app.projects = state?.projects ?? []
@@ -324,6 +327,7 @@ export async function removeProject(id: string) {
   app.chats.filter((c) => c.projectId === id).forEach((c) => closePane(c.id))
   app.chats = app.chats.filter((c) => c.projectId !== id)
   app.groups = app.groups.filter((g) => g.projectId !== id)
+  app.tasks = app.tasks.filter((t) => t.projectId !== id)
   app.projects = app.projects.filter((p) => p.id !== id)
 }
 
@@ -375,6 +379,8 @@ export async function runProject(sourceId: string) {
   if (!source || !project) return
   if (!shell) return fail('Rodar projeto', 'crie um perfil de shell (command vazio) em Configurações → Agentes')
   if (!project.runCommand?.trim()) {
+    toast({ tone: 'info', title: 'Defina o comando para rodar o projeto', text: 'Ele roda assim que você salvar.' })
+    app.pendingRun = source.id
     app.editingProject = project.id
     app.modal = 'project'
     return
@@ -411,8 +417,10 @@ export async function addChat(projectId: string, profileId: string, groupId?: st
   const profile = app.profiles.find((p) => p.id === profileId)
   const project = app.projects.find((p) => p.id === projectId)
   if (!profile || !project) return
-  const count = app.chats.filter((c) => c.projectId === projectId && c.profileId === profileId).length
-  const chat: Chat = { id: uid(), name: `${profile.name} ${count + 1}`, profileId, projectId, groupId }
+  const taken = new Set(app.chats.map((c) => c.name))
+  let n = 1
+  while (taken.has(`${profile.name} ${n}`)) n += 1
+  const chat: Chat = { id: uid(), name: `${profile.name} ${n}`, profileId, projectId, groupId }
   if (worktree) {
     try {
       const created = await invoke<{ path: string; branch: string }>('git_worktree_add', {
@@ -443,7 +451,8 @@ export async function archiveChat(id: string, archived: boolean) {
 }
 
 export function renameChat(id: string, name: string) {
-  if (name.trim()) app.chats = app.chats.map((c) => (c.id === id ? { ...c, name: name.trim(), namedByUser: true } : c))
+  const next = name.trim()
+  if (next) app.chats = app.chats.map((c) => (c.id === id && c.name !== next ? { ...c, name: next, namedByUser: true } : c))
 }
 
 export function moveChat(id: string, projectId: string, groupId?: string) {
@@ -451,20 +460,27 @@ export function moveChat(id: string, projectId: string, groupId?: string) {
 }
 
 /** Com worktree, pergunta se apaga a pasta também (a branch sempre fica). */
-export async function removeChat(id: string) {
+export async function removeChat(id: string, confirm = true) {
   const chat = chatById(id)
   if (!chat) return
+  const sure = !confirm || await ask(`Remover "${chat.name}" da barra lateral? O processo é encerrado; a conversa continua nos logs do agente.`, {
+    title: 'Remover chat',
+    kind: 'warning',
+  })
+  if (!sure) return
   closePane(id)
   // O shell de "rodar" deste chat usa a mesma pasta: sai junto.
   for (const run of app.chats.filter((c) => c.runOf === id)) closePane(run.id)
   app.chats = app.chats.filter((c) => c.id !== id && c.runOf !== id)
+  delete app.pendingPrompt[id]
+  delete app.touched[id]
   // O shell de "rodar" usa a pasta do chat, mas o worktree não é dele.
   if (!chat.cwd || chat.runOf) return
   const remove = await ask(`Apagar também o worktree em ${chat.cwd}? A branch ${chat.branch} continua no repositório.`, {
     title: 'Remover chat',
     kind: 'warning',
   })
-  if (remove) invoke('git_worktree_remove', { path: chat.cwd }).catch((e) => fail('Worktree mantido', e))
+  if (remove) invoke('git_worktree_remove', { project: projectOf(chat)?.path ?? chat.cwd, path: chat.cwd }).catch((e) => fail('Worktree mantido', e))
 }
 
 export const chatDir = (chat: Chat) => chat.cwd ?? projectOf(chat)?.path
@@ -549,6 +565,26 @@ export function closePane(id: string) {
     app.active = null
     app.activeTab = null
   }
+}
+
+/** Fechar encerra o processo: pergunta quando algum agente ainda trabalha ou espera você. */
+export async function confirmStop(ids: string[]): Promise<boolean> {
+  const busy = ids.filter((id) => app.status[id] === 'running' || app.status[id] === 'waiting').map((id) => chatById(id)?.name ?? 'chat')
+  if (busy.length === 0) return true
+  const who = busy.join(', ')
+  return ask(`${who} ${busy.length === 1 ? 'ainda está' : 'ainda estão'} trabalhando. Fechar encerra o processo agora.`, {
+    title: 'Fechar chat',
+    kind: 'warning',
+  })
+}
+
+export async function requestClosePane(id: string) {
+  if (await confirmStop([id])) closePane(id)
+}
+
+export async function requestCloseTab(tabId: string) {
+  const tab = app.tabs.find((t) => t.id === tabId)
+  if (tab && (await confirmStop(tab.panes))) closeTab(tabId)
 }
 
 export function closeTab(tabId: string) {

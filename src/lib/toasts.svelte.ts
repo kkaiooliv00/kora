@@ -12,6 +12,8 @@ export interface Toast {
   title: string
   text?: string
   actions?: ToastAction[]
+  /** Fica até o usuário agir (pedido de confirmação). */
+  persistent?: boolean
 }
 
 /** success/info somem em 5 s, warning em 8 s; danger só fecha pelo usuário (componente Toast do design). */
@@ -25,7 +27,13 @@ let nextId = 1
 /** Mostra um aviso no canto inferior direito; o mais antigo sai quando passa de 3. */
 export function toast(item: Omit<Toast, 'id'>): number {
   const id = nextId++
-  toastState.list = [...toastState.list, { ...item, id }].slice(-MAX_TOASTS)
+  // Passou do limite: sai o mais antigo que não seja persistente nem erro (esses só o usuário fecha).
+  let list = [...toastState.list, { ...item, id }]
+  while (list.length > MAX_TOASTS) {
+    const victim = list.find((t) => !t.persistent && t.tone !== 'danger') ?? list[0]
+    list = list.filter((t) => t !== victim)
+  }
+  toastState.list = list
   return id
 }
 

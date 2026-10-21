@@ -56,6 +56,11 @@ pub fn run() {
             history::save_text,
             usage::usage_summary
         ])
-        .run(tauri::generate_context!())
-        .expect("falha ao iniciar o Kora");
+        .build(tauri::generate_context!())
+        .expect("falha ao iniciar o Kora")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                pty::kill_all(&app.state::<pty::Ptys>());
+            }
+        });
 }

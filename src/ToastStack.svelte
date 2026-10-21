@@ -4,7 +4,7 @@
 
   /** Cada aviso conta o próprio tempo e pausa com o mouse em cima. */
   function lifetime(node: HTMLElement, toast: Toast) {
-    const total = TOAST_DURATION[toast.tone]
+    const total = toast.persistent ? null : TOAST_DURATION[toast.tone]
     if (total === null) return
     let remaining = total
     let started = Date.now()

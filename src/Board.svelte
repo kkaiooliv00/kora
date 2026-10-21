@@ -80,6 +80,7 @@
           ondrop={() => drop(column.id)}
         >
           <p class="overline">{column.label} <span class="n">{items.length}</span></p>
+          {#if column.hint}<p class="hint">{column.hint}</p>{/if}
           {#if column.id === 'todo'}
             <form onsubmit={submit}>
               <textarea
@@ -104,12 +105,13 @@
                   </button>
                 {/if}
                 <span class="spacer"></span>
+                {#if column.id === 'todo'}<button class="btn sm" onclick={() => moveTask(task.id, 'doing', profileId, worktree)} title="Abre um agente com esta tarefa">Iniciar →</button>{/if}
                 {#if column.id === 'review' && chat}<button class="btn sm" onclick={() => review(task)}>Ver mudanças</button>{/if}
                 <button class="icon-btn" aria-label="Remover tarefa" title="Remover tarefa" onclick={() => removeTask(task.id)}><X size={14} strokeWidth={1.5} /></button>
               </div>
             </article>
           {/each}
-          {#if items.length === 0 && column.hint}<p class="hint">{column.hint}</p>{/if}
+
         </section>
       {/each}
     </main>
@@ -208,6 +210,9 @@
   }
   .chip {
     display: inline-flex;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     gap: var(--space-1);
     min-width: 0;
     font: 12px var(--font-mono);

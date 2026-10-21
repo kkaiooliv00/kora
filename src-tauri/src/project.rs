@@ -5,6 +5,7 @@ use std::{
     io::Read,
     net::TcpListener,
     path::{Component, Path},
+    sync::mpsc,
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -15,6 +16,9 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(600);
 const POLL: Duration = Duration::from_millis(200);
 /// Só o fim da saída vai para o aviso de erro.
 const OUTPUT_TAIL: usize = 1200;
+/// Quanto da saída fica na memória enquanto o script roda (o resto é descartado do começo).
+const KEEP_BYTES: usize = 64 * 1024;
+const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// Caminho relativo simples, sem `..` nem raiz: nada sai da pasta do projeto.
 fn is_safe_relative(path: &str) -> bool {
@@ -57,15 +61,24 @@ fn run_setup(dir: &str, root: &str, command: &str) -> Result<String, String> {
         .map_err(|e| format!("não foi possível rodar o script: {e}"))?;
     // Lê a saída em paralelo: um script verboso (npm install) não trava esperando o pipe esvaziar.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let mut text = String::new();
+            let mut kept: Vec<u8> = Vec::new();
             if let Some(mut pipe) = pipe {
-                let mut raw = Vec::new();
-                let _ = pipe.read_to_end(&mut raw);
-                text = String::from_utf8_lossy(&raw).into_owned();
+                let mut buf = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    kept.extend_from_slice(&buf[..n]);
+                    if kept.len() > KEEP_BYTES {
+                        kept.drain(..kept.len() - KEEP_BYTES);
+                    }
+                }
             }
-            text
-        })
+            let _ = tx.send(String::from_utf8_lossy(&kept).into_owned());
+        });
+        rx
     };
     let out = drain(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
     let err = drain(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
@@ -89,8 +102,9 @@ fn run_setup(dir: &str, root: &str, command: &str) -> Result<String, String> {
         }
         std::thread::sleep(POLL);
     };
-    let out = out.join().unwrap_or_default();
-    let err = err.join().unwrap_or_default();
+    // Um processo deixado em segundo plano (npm run dev &) segura o pipe aberto: não espera por ele.
+    let out = out.recv_timeout(DRAIN_GRACE).unwrap_or_default();
+    let err = err.recv_timeout(DRAIN_GRACE).unwrap_or_default();
     if status.success() { Ok(tail(&out)) } else { Err(tail(&format!("{err}\n{out}"))) }
 }
 

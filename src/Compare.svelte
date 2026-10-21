@@ -60,7 +60,8 @@
     const project = projectOf(chat)
     const dir = chatDir(chat)
     if (!project || !dir || !chat.branch || !group) return
-    if (app.status[chat.id] === 'running' && !(await ask(`${chat.name} ainda está trabalhando. Mesclar o que existe agora?`, { title: 'Ficar com este', kind: 'warning' }))) return
+    const still = app.status[chat.id] === 'running' ? ` ${chat.name} ainda está trabalhando; entra o que existe agora.` : ''
+    if (!(await ask(`Ficar com ${chat.name}? As mudanças dele viram commit e ${chat.branch} é mesclada no projeto.${still}`, { title: 'Ficar com este', kind: 'warning' }))) return
     busy = chat.id
     try {
       // Diff atualizado: o agente pode ter mudado arquivos depois do último "Atualizar".
@@ -72,7 +73,18 @@
         tone: 'success',
         title: `${chat.name} escolhido`,
         text: `${chat.branch} mesclada no projeto.`,
-        actions: others.length ? [{ label: `Remover os outros ${others.length}`, run: () => others.forEach((c) => removeChat(c.id)) }] : undefined,
+        actions: others.length
+          ? [
+              {
+                label: `Remover os outros ${others.length}`,
+                run: async () => {
+                  const names = others.map((c) => c.name).join(', ')
+                  if (await ask(`Remover ${names}? Os processos são encerrados.`, { title: 'Remover chats', kind: 'warning' })) others.forEach((c) => removeChat(c.id, false))
+                },
+              },
+            ]
+          : undefined,
+        persistent: others.length > 0,
       })
     } catch (e) {
       fail(`Não foi possível ficar com ${chat.name}`, e)

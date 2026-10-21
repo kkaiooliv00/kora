@@ -20,7 +20,7 @@ const EMPTY: Queue = { pending: [], sent: [], paused: false, pauseOnError: true,
 export const queueOf = (id: string): Queue => app.queue[id] ?? EMPTY
 const update = (id: string, patch: Partial<Queue>) => (app.queue[id] = { ...queueOf(id), ...patch })
 
-function submitNext(id: string) {
+export function submitNext(id: string) {
   const queue = queueOf(id)
   const [next, ...rest] = queue.pending
   const terminal = terminals.get(id)
@@ -45,6 +45,7 @@ export function sendNext(id: string) {
   const name = chatById(id)?.name ?? 'chat'
   toast({
     tone: 'warning',
+    persistent: true,
     title: `${name} terminou`,
     text: `Próximo da fila: ${queue.pending[0]}`,
     actions: [
@@ -58,7 +59,7 @@ export function sendNext(id: string) {
 export function onQueueStatus(id: string, previous: Status | undefined, status: Status) {
   const queue = app.queue[id]
   if (!queue) return
-  if (status === 'idle' && previous === 'running') {
+  if (status === 'idle' && (previous === 'running' || previous === 'waiting')) {
     if (queue.current) update(id, { current: undefined, sent: [...queue.sent, queue.current] })
     sendNext(id)
   } else if (status === 'error' && queue.pauseOnError && queue.pending.length > 0) {
@@ -100,7 +101,7 @@ export function broadcast(text: string, ids: string[]): { sent: number; queued: 
     if (busy) {
       update(id, { pending: [...queueOf(id).pending, text.trim()] })
       queued += 1
-    } else if (terminals.get(id)) {
+    } else if (terminals.get(id)?.pty() !== undefined && app.status[id] === 'idle') {
       terminals.get(id)?.submit(text.trim())
       sent += 1
     }

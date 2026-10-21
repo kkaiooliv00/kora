@@ -6,7 +6,7 @@
   import { CATEGORIES, type Policy } from './lib/permissions'
   import EmptyState from './EmptyState.svelte'
   import { sharedWith } from './lib/automation'
-  import { contextPercent, contextWindow, formatMemory, procStats } from './lib/stats.svelte'
+  import { contextPercent, contextWindow, formatMemory, percent, procStats } from './lib/stats.svelte'
 
   const POLICY: Record<Policy, { text: string; tone: string }> = {
     allow: { text: '✓ sempre', tone: 'success' },
@@ -105,7 +105,7 @@
           </li>
         {/each}
       </ul>
-      <button class="link" onclick={() => (app.modal = 'settings')}>Editar permissões</button>
+      <button class="link" onclick={() => ((app.settingsSection = 'permissoes'), (app.modal = 'settings'))}>Editar permissões</button>
     </section>
 
     <section>
@@ -161,7 +161,7 @@
   {#if chat && proc}
     <section>
       <p class="overline">processo</p>
-      <p class="muted mono-line">{proc.cpu.toFixed(1)}% CPU · {formatMemory(proc.memory)}</p>
+      <p class="muted mono-line">{percent(proc.cpu)} de CPU · {formatMemory(proc.memory)}</p>
     </section>
   {/if}
 </aside>

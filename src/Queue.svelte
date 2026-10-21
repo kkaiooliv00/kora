@@ -3,7 +3,7 @@
   import GripVertical from '@lucide/svelte/icons/grip-vertical'
   import CornerDownLeft from '@lucide/svelte/icons/corner-down-left'
   import { app, chatById } from './lib/state.svelte'
-  import { clearQueue, dequeue, enqueue, moveQueued, queueOf, setQueueOption } from './lib/queue'
+  import { clearQueue, dequeue, enqueue, moveQueued, queueOf, setQueueOption, submitNext } from './lib/queue'
 
   const id = app.active ?? ''
   const chat = chatById(id)
@@ -25,7 +25,8 @@
   }
 </script>
 
-<div class="backdrop">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Esc fecha pelo App) -->
+<div class="backdrop" onclick={(e) => e.target === e.currentTarget && (app.modal = null)}>
   <div class="modal queue" role="dialog" aria-modal="true" aria-label="Fila de prompts">
     <div class="content">
       <header>
@@ -96,6 +97,14 @@
         {queue.pending.length} na fila · {queue.current ? 1 : 0} em execução · {sentCount} {sentCount === 1 ? 'enviado' : 'enviados'}
       </span>
       <button class="btn ghost" disabled={queue.pending.length === 0} onclick={() => clearQueue(id)}>Limpar fila</button>
+      <button
+        class="btn"
+        disabled={queue.pending.length === 0 || app.status[id] !== 'idle'}
+        title={app.status[id] === 'idle' ? 'Envia o próximo da fila agora' : 'O agente precisa estar pronto'}
+        onclick={() => submitNext(id)}
+      >
+        Enviar próximo
+      </button>
       <button class="btn" onclick={() => setQueueOption(id, { paused: !queue.paused })}>{queue.paused ? 'Retomar fila' : 'Pausar fila'}</button>
       <button class="btn primary" onclick={() => (app.modal = null)}>Concluir</button>
     </footer>

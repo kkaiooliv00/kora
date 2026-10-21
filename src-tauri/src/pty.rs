@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard, PoisonError,
     },
     thread,
 };
@@ -30,6 +30,39 @@ struct Pty {
 pub struct Ptys {
     map: Arc<Mutex<HashMap<u32, Pty>>>,
     next: AtomicU32,
+}
+
+/// Um pânico com o lock travado não pode derrubar todos os terminais.
+fn lock(map: &Mutex<HashMap<u32, Pty>>) -> MutexGuard<'_, HashMap<u32, Pty>> {
+    map.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Encerra o processo e tudo que ele abriu (o agente via cmd.exe, node, dev servers…).
+fn kill_tree(pty: &mut Pty) {
+    if let Some(pid) = pty.pid {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn();
+        }
+        #[cfg(unix)]
+        {
+            // O PTY abre o filho numa sessão própria: pid == grupo; `-pid` atinge o grupo inteiro.
+            let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).spawn();
+        }
+    }
+    let _ = pty.killer.kill();
+}
+
+/// Fechar o Kora encerra todos os agentes (senão continuariam editando arquivos sem janela).
+pub fn kill_all(state: &Ptys) {
+    for pty in lock(&state.map).values_mut() {
+        kill_tree(pty);
+    }
 }
 
 fn size(cols: u16, rows: u16) -> PtySize {
@@ -68,6 +101,28 @@ fn find_executable(program: &str, dirs: impl Iterator<Item = PathBuf>) -> Option
     })
 }
 
+/// Nome curto 8.3 (sem espaços) de um caminho; se o volume não tiver nomes curtos, devolve o original.
+#[cfg(windows)]
+fn short_path(path: &std::ffi::OsStr) -> OsString {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    unsafe extern "system" {
+        fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+    }
+    let wide: Vec<u16> = path.encode_wide().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 1024];
+    // SAFETY: `wide` termina em 0 e `buf` tem o tamanho informado; a função só escreve até `len`.
+    let len = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+    if len == 0 || len >= buf.len() {
+        return path.to_os_string();
+    }
+    OsString::from_wide(&buf[..len])
+}
+
+#[cfg(not(windows))]
+fn short_path(path: &std::ffi::OsStr) -> OsString {
+    path.to_os_string()
+}
+
 /// Executável + argumentos iniciais para rodar `program`.
 /// No Windows: `.cmd`/`.bat` passam pelo `cmd /d /c` e `.ps1` pelo PowerShell.
 pub fn resolve_program(program: &str) -> Result<(OsString, Vec<OsString>), String> {
@@ -80,15 +135,18 @@ pub fn resolve_program(program: &str) -> Result<(OsString, Vec<OsString>), Strin
     let ext = exe.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     let prefix = |args: &[&str]| args.iter().map(OsString::from).chain([exe.clone().into_os_string()]).collect();
     Ok(match ext.as_str() {
-        "cmd" | "bat" => ("cmd.exe".into(), prefix(&["/d", "/c"])),
+        // `cmd /c "C:\Users\Maria Silva\...\claude.cmd" --x "a b"` perde as aspas de fora e quebra no espaço:
+        // o nome curto 8.3 do script não tem espaço, então não precisa de aspas.
+        "cmd" | "bat" => {
+            let script = short_path(exe.as_os_str());
+            ("cmd.exe".into(), ["/d", "/c"].iter().map(OsString::from).chain([script]).collect())
+        }
         "ps1" => ("powershell.exe".into(), prefix(&["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])),
         _ => (exe.clone().into_os_string(), Vec::new()),
     })
 }
 
 /// Abre o agente direto, sem shell no meio (o PowerShell custava ~0,5 s por chat).
-// ponytail: cmd /c quebra se o caminho do .cmd tiver espaço E houver args com aspas;
-// resolver com o parser de linha do cmd se aparecer.
 fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, String> {
     let (exe, prefix) = resolve_program(program)?;
     let mut cmd = CommandBuilder::new(exe);
@@ -114,10 +172,11 @@ fn kora_env(builder: &mut CommandBuilder, api: &Api, chat: Option<&str>) {
     }
 }
 
+// async: o ConPTY (e o antivírus olhando o processo novo) não seguram a janela.
 #[tauri::command]
-pub fn pty_spawn(
-    state: State<Ptys>,
-    api: State<Api>,
+pub async fn pty_spawn(
+    state: State<'_, Ptys>,
+    api: State<'_, Api>,
     chat: Option<String>,
     program: Option<String>,
     args: Option<Vec<String>>,
@@ -145,11 +204,19 @@ pub fn pty_spawn(
     let mut child = pair.slave.spawn_command(builder).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    // Falhou depois de abrir o processo: não deixa o filho rodando sem dono.
+    let io = pair.master.try_clone_reader().and_then(|r| Ok((r, pair.master.take_writer()?)));
+    let (mut reader, writer) = match io {
+        Ok(io) => io,
+        Err(e) => {
+            let _ = child.kill();
+            return Err(e.to_string());
+        }
+    };
     let id = state.next.fetch_add(1, Ordering::Relaxed);
+    let mut orphan_killer = child.clone_killer();
 
-    state.map.lock().unwrap().insert(
+    lock(&state.map).insert(
         id,
         Pty { master: pair.master, writer, killer: child.clone_killer(), pid: child.process_id() },
     );
@@ -160,7 +227,9 @@ pub fn pty_spawn(
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
+                    // Janela recarregada: ninguém mais lê este terminal, então o processo sai junto.
                     if on_data.send(InvokeResponseBody::Raw(buf[..n].to_vec())).is_err() {
+                        let _ = orphan_killer.kill();
                         break;
                     }
                 }
@@ -172,7 +241,9 @@ pub fn pty_spawn(
     let map = state.map.clone();
     thread::spawn(move || {
         let code = child.wait().map(|s| s.exit_code()).unwrap_or(u32::MAX);
-        map.lock().unwrap().remove(&id);
+        // Solta o lock antes de destruir o master (o ClosePseudoConsole pode demorar).
+        let removed = lock(&map).remove(&id);
+        drop(removed);
         let _ = on_exit.send(code);
     });
 
@@ -180,30 +251,30 @@ pub fn pty_spawn(
 }
 
 #[tauri::command]
-pub fn pty_write(state: State<Ptys>, id: u32, data: String) -> Result<(), String> {
-    let mut map = state.map.lock().unwrap();
+pub async fn pty_write(state: State<'_, Ptys>, id: u32, data: String) -> Result<(), String> {
+    let mut map = lock(&state.map);
     let pty = map.get_mut(&id).ok_or("pty não encontrado")?;
     pty.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn pty_resize(state: State<Ptys>, id: u32, cols: u16, rows: u16) -> Result<(), String> {
-    let map = state.map.lock().unwrap();
+pub async fn pty_resize(state: State<'_, Ptys>, id: u32, cols: u16, rows: u16) -> Result<(), String> {
+    let map = lock(&state.map);
     let pty = map.get(&id).ok_or("pty não encontrado")?;
     pty.master.resize(size(cols, rows)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn pty_kill(state: State<Ptys>, id: u32) -> Result<(), String> {
-    match state.map.lock().unwrap().get_mut(&id) {
-        Some(pty) => pty.killer.kill().map_err(|e| e.to_string()),
-        None => Ok(()),
+pub async fn pty_kill(state: State<'_, Ptys>, id: u32) -> Result<(), String> {
+    if let Some(pty) = lock(&state.map).get_mut(&id) {
+        kill_tree(pty);
     }
+    Ok(())
 }
 
 /// PIDs dos terminais pedidos (id do Kora → pid do processo raiz).
 pub fn pids(state: &Ptys, ids: &[u32]) -> Vec<(u32, u32)> {
-    let map = state.map.lock().unwrap();
+    let map = lock(&state.map);
     ids.iter().filter_map(|id| Some((*id, map.get(id)?.pid?))).collect()
 }
 

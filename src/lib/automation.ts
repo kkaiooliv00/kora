@@ -47,7 +47,7 @@ export function templateFields(text: string): string[] {
 }
 
 export function fillTemplate(text: string, values: Record<string, string>): string {
-  return text.replace(FIELD, (whole, name: string) => values[name.trim()] ?? whole)
+  return text.replace(FIELD, (whole, name: string) => (Object.hasOwn(values, name.trim()) ? values[name.trim()] : whole))
 }
 
 /** Cola o snippet no chat em foco; se tiver campos `{nome}`, pergunta os valores antes. */
@@ -87,13 +87,16 @@ export async function notify(title: string, body: string) {
 export function onHookStatus(id: string, status: Status, session: string | null, detail: HookDetail | null) {
   if (!isOpen(id)) return
   const previous = app.status[id]
+  // Aviso de ociosidade do Claude depois de terminar: o chat continua pronto, não esperando você.
+  const idleNotice = detail?.event === 'Notification' && !PERMISSION_MESSAGE.test(detail.message ?? '')
+  if (idleNotice && (previous === 'idle' || previous === 'done' || previous === undefined)) return
   setStatus(id, status)
   const chat = chatById(id)
   if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
   updateAgentInfo(id, status, detail)
   if (!chat) return
   if (detail?.file) noteTouched(chat, detail.file)
-  const finished = status === 'idle' && previous === 'running'
+  const finished = status === 'idle' && (previous === 'running' || previous === 'waiting')
   // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
   if (!document.hasFocus()) {
     if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')

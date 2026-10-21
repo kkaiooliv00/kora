@@ -32,8 +32,13 @@ export function watchStats(): () => void {
   return () => clearInterval(timer)
 }
 
+const pct = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
+/** "3,2%" (formato brasileiro, como o resto da interface). */
+export const percent = (value: number) => `${pct.format(value)}%`
+
+const mem = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
 export const formatMemory = (bytes: number) =>
-  bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`
+  bytes >= 1024 ** 3 ? `${mem.format(bytes / 1024 ** 3)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`
 
 // Janela de contexto padrão do Claude; 1M na variante [1m], acima de 200k ou nos Opus que já vêm com 1M.
 // ponytail: tabela por nome de modelo; o tamanho exato só chega no JSON da statusline, que é do usuário.

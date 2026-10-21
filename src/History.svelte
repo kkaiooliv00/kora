@@ -83,7 +83,7 @@
     <label class="search">
       <Search size={16} strokeWidth={1.5} />
       <input bind:value={query} oninput={onInput} use:focus placeholder="Um termo, um arquivo, uma decisão…" aria-label="Buscar" spellcheck="false" />
-      {#if loading}<span class="state">buscando…</span>{:else if query.trim().length >= 2}<span class="state">{hits.length} resultados</span>{/if}
+      {#if loading}<span class="state">buscando…</span>{:else if query.trim().length >= 2}<span class="state">{hits.length} {hits.length === 1 ? 'resultado' : 'resultados'}</span>{/if}
     </label>
 
     {#if error}

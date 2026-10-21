@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core'
   import { app, chatById, chatDir, fail, projectOf, removeChat } from './lib/state.svelte'
   import { toast } from './lib/toasts.svelte'
+  import { ask } from '@tauri-apps/plugin-dialog'
   import { parseDiff, type DiffFile } from './lib/diff'
   import EmptyState from './EmptyState.svelte'
   import Skeleton from './Skeleton.svelte'
@@ -51,6 +52,8 @@
   const merge = () =>
     act('Mesclar', async () => {
       if (!project || !worktreeBranch || !chat) return
+      const target = mainBranch ?? 'a branch atual do projeto'
+      if (!(await ask(`Mesclar ${worktreeBranch} em ${target}? Isso cria um commit de merge na pasta do projeto.`, { title: 'Mesclar', kind: 'warning' }))) return
       await invoke('git_merge', { project: project.path, branch: worktreeBranch })
       toast({
         tone: 'success',
@@ -97,7 +100,8 @@
   refresh()
 </script>
 
-<div class="backdrop">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Esc fecha pelo App) -->
+<div class="backdrop" onclick={(e) => e.target === e.currentTarget && (app.modal = null)}>
   <div class="modal diff" role="dialog" aria-modal="true" aria-label="Mudanças">
     <header>
       <div class="titles">
@@ -112,7 +116,7 @@
       <div class="actions">
         <form class="commit" onsubmit={(e) => (e.preventDefault(), commit())}>
           <input class="input" bind:value={message} placeholder="Mensagem do commit" aria-label="Mensagem do commit" disabled={!hasChanges} />
-          <button class="btn" type="submit" disabled={!hasChanges || !message.trim() || !!busy}>{busy === 'Commit' ? 'Commitando…' : 'Commit'}</button>
+          <button class="btn" type="submit" disabled={!hasChanges || !message.trim() || !!busy}>{busy === 'Commit' ? 'Criando commit…' : 'Criar commit'}</button>
         </form>
         {#if worktreeBranch}
           <button

@@ -62,12 +62,17 @@ function send(target: string, raw: string, from: string | null): string {
   const profile = app.profiles.find((p) => p.id === chat.profileId)
   if (!profile?.command.trim()) throw new Error(`"${chat.name}" é um shell, não um agente; mensagens só vão para chats de IA`)
   const terminal = openTerminal(chat)
+  // O Enter do envio escolheria a opção marcada ("Sim") no menu de permissão do alvo.
+  if (app.status[chat.id] === 'waiting' || app.agentInfo[chat.id]?.permission) {
+    throw new Error(`"${chat.name}" está esperando uma resposta do usuário; tente depois`)
+  }
   if (!admitAgentMessage()) {
     throw new Error(
       `entregas pausadas: ${AGENT_MESSAGE_LIMIT} mensagens entre agentes sem interação humana. Peça ao usuário para liberar no Kora.`,
     )
   }
-  const sender = from ? chatById(from)?.name : undefined
+  // O nome vem do título da sessão (controlado pelo agente): limpa como a mensagem.
+  const sender = from ? sanitizeMessage(chatById(from)?.name ?? '') || undefined : undefined
   terminal.submit(`[mensagem de ${sender ?? 'outro processo'}] ${text}`)
   return `enviado para ${chat.name}`
 }

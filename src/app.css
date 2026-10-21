@@ -303,3 +303,11 @@ input[type='checkbox'],
 input[type='radio'] {
   accent-color: var(--accent);
 }
+
+:root {
+  color-scheme: dark;
+}
+* {
+  scrollbar-color: var(--line-control) transparent;
+  scrollbar-width: thin;
+}

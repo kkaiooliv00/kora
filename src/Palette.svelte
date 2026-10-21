@@ -104,7 +104,7 @@
       <span><Kbd keys={['↑']} /><Kbd keys={['↓']} /> navegar</span>
       <span><Kbd keys={['↵']} /> abrir</span>
       <span class="spacer"></span>
-      <span class="mono">{flat.length} resultados</span>
+      <span class="mono">{flat.length} {flat.length === 1 ? 'resultado' : 'resultados'}</span>
     </footer>
   </div>
 </div>

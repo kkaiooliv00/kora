@@ -1,14 +1,15 @@
 <script lang="ts">
   import X from '@lucide/svelte/icons/x'
-  import { app, openIds, type Chat } from './lib/state.svelte'
+  import { app, openIds, profileOf, type Chat } from './lib/state.svelte'
   import { broadcast } from './lib/automation'
   import { toast } from './lib/toasts.svelte'
 
   const open = new Set(openIds())
-  const openChats = app.chats.filter((c) => open.has(c.id))
+  const openChats = app.chats.filter((c) => open.has(c.id) && !c.runOf && profileOf(c)?.command.trim())
   const activeTabPanes = app.tabs.find((t) => t.id === app.activeTab)?.panes ?? []
   // Padrão: os chats da divisão atual; se for um só, todos os abertos.
-  let selected = $state<string[]>(activeTabPanes.length > 1 ? [...activeTabPanes] : openChats.map((c) => c.id))
+  const agentIds = new Set(openChats.map((c) => c.id))
+  let selected = $state<string[]>(activeTabPanes.length > 1 ? activeTabPanes.filter((id) => agentIds.has(id)) : [...agentIds])
   let text = $state('')
   let whenBusy = $state<'queue' | 'skip'>('queue')
 
@@ -61,18 +62,19 @@
     <input type="checkbox" value={chat.id} bind:group={selected} />
     <span class="name">{chat.name}</span>
     {#if isBusy(chat.id)}
-      <span class="badge warning">! ocupado · {whenBusy === 'queue' ? 'vai para a fila' : 'será pulado'}</span>
+      <span class="badge warning">! {app.status[chat.id] === 'waiting' ? 'aguardando você' : 'ocupado'} · {whenBusy === 'queue' ? 'vai para a fila' : 'será pulado'}</span>
     {:else}
       <span class="free">livre</span>
     {/if}
   </label>
 {/snippet}
 
-<div class="backdrop">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions (Esc fecha pelo App) -->
+<div class="backdrop" onclick={(e) => e.target === e.currentTarget && (app.modal = null)}>
   <div class="modal broadcast" role="dialog" aria-modal="true" aria-label="Broadcast">
     <form onsubmit={send}>
       <header>
-        <h2>broadcast</h2>
+        <h2>enviar para vários</h2>
         <button type="button" class="icon-btn" aria-label="Fechar" onclick={() => (app.modal = null)}><X size={16} strokeWidth={1.5} /></button>
       </header>
       <p class="sub">Envia o mesmo prompt para vários chats de uma vez. Cada chat responde no próprio painel.</p>
@@ -118,7 +120,7 @@
 
       <footer>
         <span class="summary">
-          {selected.length} {selected.length === 1 ? 'chat selecionado' : 'chats selecionados'}{busyCount && whenBusy === 'queue' ? ` · ${busyCount} vai para a fila` : ''}
+          {selected.length} {selected.length === 1 ? 'chat selecionado' : 'chats selecionados'}{busyCount && whenBusy === 'queue' ? ` · ${busyCount} ${busyCount === 1 ? 'vai' : 'vão'} para a fila` : ''}
         </span>
         <button type="button" class="btn ghost" onclick={() => (app.modal = null)}>Cancelar</button>
         <button type="submit" class="btn primary" disabled={!text.trim() || sendCount === 0}>

@@ -3,6 +3,7 @@ use std::{fs, path::Path, process::Command};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const MAX_DIFF: usize = 5 * 1024 * 1024;
 
 pub(crate) fn git(dir: &str, args: &[&str]) -> Result<String, String> {
     git_env(dir, args, &[])
@@ -20,9 +21,9 @@ pub(crate) fn git_env(dir: &str, args: &[&str], envs: &[(&str, &str)]) -> Result
     }
     let out = cmd.output().map_err(|e| format!("git não encontrado: {e}"))?;
     if !out.status.success() {
-        // Alguns erros (ex.: "nothing to commit") saem no stdout.
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err });
+        // stderr + stdout: "nothing to commit" e as linhas de CONFLICT saem no stdout.
+        let text = format!("{}\n{}", String::from_utf8_lossy(&out.stderr).trim(), String::from_utf8_lossy(&out.stdout).trim());
+        return Err(text.trim().to_string());
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -60,7 +61,7 @@ fn exclude_kora_dir(root: &str) -> Result<(), String> {
 
 /// Cria `.kora/worktrees/<nome>` numa branch nova `kora/<nome>` a partir do HEAD atual.
 #[tauri::command]
-pub fn git_worktree_add(project: String, name: String) -> Result<Worktree, String> {
+pub async fn git_worktree_add(project: String, name: String) -> Result<Worktree, String> {
     let name = slug(&name);
     if name.is_empty() {
         return Err("nome de worktree inválido".into());
@@ -75,10 +76,14 @@ pub fn git_worktree_add(project: String, name: String) -> Result<Worktree, Strin
     Ok(Worktree { path, branch })
 }
 
-/// Remove o worktree; recusa se houver mudanças não commitadas (a branch fica).
+/// Remove o worktree a partir do repositório principal (o git não apaga a pasta em que está rodando);
+/// recusa se houver mudanças não commitadas. Pasta já apagada à mão: só limpa o registro. A branch fica.
 #[tauri::command]
-pub fn git_worktree_remove(path: String) -> Result<(), String> {
-    git(&path, &["worktree", "remove", &path]).map(|_| ())
+pub async fn git_worktree_remove(project: String, path: String) -> Result<(), String> {
+    if !Path::new(&path).exists() {
+        return git(&project, &["worktree", "prune"]).map(|_| ());
+    }
+    git(&project, &["worktree", "remove", &path]).map(|_| ())
 }
 
 /// `git init` na pasta (botão do estado de erro do diff).
@@ -93,7 +98,12 @@ pub async fn git_init(dir: String) -> Result<(), String> {
 /// Branch atual da pasta, ou `None` se não for repositório git. (async: fora do thread da janela)
 #[tauri::command]
 pub async fn git_branch(dir: String) -> Option<String> {
-    git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty())
+    // symbolic-ref funciona em repositório sem commit; HEAD destacado mostra o commit curto.
+    git(&dir, &["symbolic-ref", "--short", "-q", "HEAD"])
+        .or_else(|_| git(&dir, &["rev-parse", "--short", "HEAD"]))
+        .ok()
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
 }
 
 #[derive(Serialize)]
@@ -105,10 +115,16 @@ pub struct Changes {
 /// `git status --short` + diff (sem cor) contra o HEAD; o frontend desenha os blocos.
 #[tauri::command]
 pub async fn git_diff(dir: String) -> Result<Changes, String> {
-    let status = git(&dir, &["status", "--short", "--branch"])?;
+    let status = git(&dir, &["-c", "core.quotepath=off", "status", "--short", "--branch"])?;
     // Repositório sem commit ainda não tem HEAD.
-    let diff = git(&dir, &["-c", "core.quotepath=off", "diff", "--no-color", "HEAD"])
+    let mut diff = git(&dir, &["-c", "core.quotepath=off", "diff", "--no-color", "HEAD"])
         .or_else(|_| git(&dir, &["-c", "core.quotepath=off", "diff", "--no-color"]))?;
+    // Diff gigante (arquivo gerado) travaria a janela: corta e avisa.
+    if diff.len() > MAX_DIFF {
+        let cut = (0..=MAX_DIFF).rev().find(|&i| diff.is_char_boundary(i)).unwrap_or(0);
+        diff.truncate(cut);
+        diff.push_str("\n@@ diff cortado em 5 MB; abra no editor para ver tudo @@\n");
+    }
     Ok(Changes { status, diff })
 }
 
@@ -142,7 +158,8 @@ pub async fn git_merge(project: String, branch: String) -> Result<String, String
         return Err("a pasta do projeto tem mudanças não commitadas; faça commit ou stash antes de mesclar".into());
     }
     git(&project, &["merge", "--no-ff", "--no-edit", branch]).map_err(|e| {
-        if !e.contains("CONFLICT") {
+        // Merge pela metade (MERGE_HEAD existe): desfaz. Não depende do idioma da mensagem do git.
+        if git(&project, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_err() {
             return e;
         }
         let _ = git(&project, &["merge", "--abort"]);
@@ -163,10 +180,20 @@ pub async fn git_pr(dir: String, branch: String) -> Result<String, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let out = cmd.output().map_err(|_| "GitHub CLI (gh) não encontrado; instale e rode gh auth login".to_string())?;
-    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    // Se o PR já existe, o gh também imprime a URL dele.
-    text.split_whitespace()
-        .find(|w| w.starts_with("https://"))
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let text = format!("{stdout}{}", String::from_utf8_lossy(&out.stderr));
+    // Sucesso: a URL está no stdout. Falha: só vale a URL do PR que já existe ("already exists");
+    // qualquer outra URL é de mensagem de erro.
+    let source = if out.status.success() {
+        stdout.as_str()
+    } else if text.contains("already exists") {
+        text.as_str()
+    } else {
+        ""
+    };
+    source
+        .split_whitespace()
+        .find(|w| w.starts_with("https://github.com/") || (out.status.success() && w.starts_with("https://")))
         .map(str::to_string)
         .ok_or_else(|| text.trim().to_string())
 }

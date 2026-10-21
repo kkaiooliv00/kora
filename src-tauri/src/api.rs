@@ -125,7 +125,11 @@ fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
     };
     // Corpo truncado ou com UTF-8 quebrado não pode derrubar o status: lê o que der.
     let mut raw = Vec::new();
-    let _ = req.as_reader().take(MAX_BODY).read_to_end(&mut raw);
+    let _ = req.as_reader().take(MAX_BODY + 1).read_to_end(&mut raw);
+    if raw.len() as u64 > MAX_BODY {
+        let _ = req.respond(Response::from_string("mensagem maior que 1 MB").with_status_code(413u16));
+        return;
+    }
     let body = String::from_utf8_lossy(&raw).into_owned();
     let from = req
         .headers()

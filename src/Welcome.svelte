@@ -46,7 +46,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Tab') {
+    if (e.key === 'Tab' && !e.shiftKey && !prompt) {
       e.preventDefault()
       profileIndex = (profileIndex + (e.shiftKey ? app.profiles.length - 1 : 1)) % app.profiles.length
     } else if (e.key === 'Enter') {
@@ -161,7 +161,7 @@
 
     <div class="shortcuts">
       <span><Kbd keys={keysOf(app.settings.keys.palette)} /> paleta de comandos</span>
-      <span><Kbd keys={['Tab']} /> trocar agente</span>
+      <span><Kbd keys={['Tab']} /> trocar agente (campo vazio)</span>
       <span><Kbd keys={keysOf(app.settings.keys.settings)} /> configurações</span>
     </div>
   </div>
@@ -217,6 +217,8 @@
   }
   .row {
     display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
     align-items: center;
     gap: var(--space-2);
     margin-bottom: var(--space-3);
