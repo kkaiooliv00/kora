@@ -25,6 +25,8 @@ export function setStatus(id: string, status: Status) {
   const previous = app.status[id]
   if (previous === status) return
   app.status[id] = status
+  if (status === 'waiting') app.waitingSince[id] = Date.now()
+  else delete app.waitingSince[id]
   onQueueStatus(id, previous, status)
   onTaskStatus(id, previous, status)
 }
@@ -96,6 +98,7 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   updateAgentInfo(id, status, detail)
   if (!chat) return
   if (detail?.file) noteTouched(chat, detail.file)
+  if (detail?.event === 'PreToolUse') watchLoop(chat, detail)
   const finished = status === 'idle' && (previous === 'running' || previous === 'waiting')
   // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
   if (!document.hasFocus()) {
@@ -146,6 +149,44 @@ function noteTouched(chat: Chat, file: string) {
 
 const PERMISSION_MESSAGE = /permission/i
 
+// ---- anti-loop por chat: o mesmo comando várias vezes sem mudar nenhum arquivo ----
+
+const ESC = '\x1b'
+/** Comandos recentes do Bash por chat; editar um arquivo zera (o agente está avançando). */
+const recentCommands = new Map<string, { command: string; at: number }[]>()
+
+function watchLoop(chat: Chat, detail: HookDetail) {
+  if (detail.file) return void recentCommands.delete(chat.id)
+  if (!detail.command || app.loopPaused[chat.id]) return
+  const { repeats, minutes } = app.settings.loop
+  const since = Date.now() - minutes * 60_000
+  const list = [...(recentCommands.get(chat.id) ?? []).filter((c) => c.at >= since), { command: detail.command, at: Date.now() }]
+  recentCommands.set(chat.id, list)
+  const same = list.filter((c) => c.command === detail.command)
+  if (repeats < 2 || same.length < repeats) return
+  // Esc interrompe o agente no meio; ele espera a sua resposta no próprio chat.
+  terminals.get(chat.id)?.keys(ESC)
+  app.loopPaused[chat.id] = { command: detail.command, count: same.length, from: same[0].at, to: same.at(-1)!.at }
+  recentCommands.delete(chat.id)
+  if (!isVisible(chat.id)) {
+    toast({
+      tone: 'warning',
+      title: `${chat.name} pausado pelo anti-loop`,
+      text: `Repetiu "${detail.command}" ${same.length} vezes sem mudar arquivos.`,
+      actions: [{ label: 'Ir para o chat', primary: true, run: () => openChat(chat.id) }],
+    })
+  }
+}
+
+/** Retoma um chat pausado pelo anti-loop: como está ("continue") ou com uma instrução sua. */
+export function resumeLoop(id: string, instruction?: string) {
+  delete app.loopPaused[id]
+  noteHumanInput()
+  terminals.get(id)?.submit(instruction?.trim() || 'Continue de onde parou, mas não repita o mesmo comando sem mudar algo antes.')
+}
+
+export const resumeAllLoops = () => Object.keys(app.loopPaused).forEach((id) => resumeLoop(id))
+
 /** Você respondeu direto no terminal: o cartão de aprovação some (senão ficaria até o próximo hook). */
 export function clearPermission(id: string) {
   if (app.agentInfo[id]?.permission) app.agentInfo[id] = { ...app.agentInfo[id], permission: undefined }
@@ -156,6 +197,9 @@ function updateAgentInfo(id: string, status: Status, detail: HookDetail | null) 
   const info = { ...app.agentInfo[id] }
   if (detail?.todos) info.todos = detail.todos
   if (detail?.context) info.context = detail.context
+  if (detail?.event === 'PreToolUse' && detail.tool) {
+    info.pending = { tool: detail.tool, command: detail.command, reason: detail.reason, target: detail.target, file: detail.file }
+  }
   if (detail?.event === 'Notification' && detail.message && PERMISSION_MESSAGE.test(detail.message)) info.permission = detail.message
   else if (status !== 'waiting') info.permission = undefined
   app.agentInfo[id] = info

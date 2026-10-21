@@ -21,7 +21,7 @@ const KEEP_BYTES: usize = 64 * 1024;
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// Caminho relativo simples, sem `..` nem raiz: nada sai da pasta do projeto.
-fn is_safe_relative(path: &str) -> bool {
+pub(crate) fn is_safe_relative(path: &str) -> bool {
     let p = Path::new(path);
     !path.trim().is_empty() && p.components().all(|c| matches!(c, Component::Normal(_)))
 }

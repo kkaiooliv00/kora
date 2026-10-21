@@ -3,6 +3,8 @@ import {
   addChat,
   addProject,
   requestClosePane,
+  hidePane,
+  goToWaiting,
   cycleTab,
   isOpen,
   openChat,
@@ -15,6 +17,7 @@ import {
 import { activeSnippets, openActiveInEditor, openInEditor, pasteSnippet, resumeAgents } from './automation'
 import { terminals } from './terminals'
 import { toast } from './toasts.svelte'
+import { answer } from './approval'
 
 /** Grupos da paleta, na ordem em que aparecem (tela 03 do design). */
 export const GROUPS = ['ações', 'sessões', 'novo chat', 'snippets', 'projetos'] as const
@@ -56,9 +59,14 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   palette: { label: 'Paleta de comandos', run: () => openPalette() },
   search: { label: 'Buscar no terminal', run: () => app.active && (app.searching = app.active) },
   split: { label: 'Dividir: abrir outro chat ao lado', run: () => openPalette('Dividir com ') },
-  closePane: { label: 'Fechar chat em foco', run: () => app.active && requestClosePane(app.active) },
-  nextTab: { label: 'Próxima aba', run: () => cycleTab(1) },
-  prevTab: { label: 'Aba anterior', run: () => cycleTab(-1) },
+  closePane: { label: 'Fechar painel (o chat segue na barra lateral)', run: () => app.active && hidePane(app.active) },
+  nextTab: { label: 'Próximo chat aberto', run: () => cycleTab(1) },
+  prevTab: { label: 'Chat aberto anterior', run: () => cycleTab(-1) },
+  waiting: { label: 'Ir para quem espera você', run: goToWaiting },
+  newChat: { label: 'Novo chat', run: () => (app.activeTab = null) },
+  approveOnce: { label: 'Aprovar uma vez', run: () => app.active && answer(app.active, 'once') },
+  approveAlways: { label: 'Aprovar sempre (neste projeto)', run: () => app.active && answer(app.active, 'always') },
+  reason: { label: 'Ver motivo e regra da aprovação', run: () => app.active && (app.showReason = app.showReason === app.active ? null : app.active) },
   broadcast: { label: 'Enviar o mesmo prompt para vários chats', run: () => (app.modal = 'broadcast') },
   queue: { label: 'Fila de prompts do chat em foco', run: () => app.active && (app.modal = 'queue') },
   editor: { label: 'Abrir projeto no editor', run: openActiveInEditor },
@@ -79,6 +87,9 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
       app.modal = 'compare'
     },
   },
+  shortcuts: { label: 'Todos os atalhos', run: () => (app.modal = 'shortcuts') },
+  tour: { label: 'Fazer o tour', run: () => ((app.modal = null), (app.activeTab = null), (app.tourStep = 0)) },
+  stopChat: { label: 'Encerrar o chat em foco (para o processo)', run: () => app.active && requestClosePane(app.active) },
 }
 
 function actionCommands(): Command[] {

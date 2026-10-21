@@ -55,7 +55,20 @@ export function installMocks() {
   setTimeout(() => {
     import('../lib/state.svelte').then(({ app }) => {
       app.status['c-2'] = 'waiting'
+      app.waitingSince['c-2'] = Date.now() - 120_000
+      app.agentInfo['c-2'] = {
+        permission: 'Claude needs your permission to use Bash',
+        pending: {
+          tool: 'Bash',
+          command: 'docker compose up -d db && npm run test:e2e',
+          reason: 'Sobe o banco local num container e roda os testes de ponta a ponta para garantir que o login funciona de verdade.',
+        },
+      }
       app.status['c-3'] = 'running'
+      if (new URLSearchParams(location.search).has('loop')) {
+        app.loopPaused['c-3'] = { command: 'npm run db:migrate', count: 6, from: Date.now() - 180_000, to: Date.now() }
+      }
+      if (!new URLSearchParams(location.search).has('tour')) app.tourStep = null
     })
   }, 1500)
   mockWindows('main')

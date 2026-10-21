@@ -11,14 +11,27 @@
 
   // Vazio = primeiro projeto (a lista pode carregar depois da tela montar).
   let projectId = $state('')
-  let profileIndex = $state(0)
+  /** Agente | Shell (Tab alterna com o campo vazio); no modo agente, qual agente. */
+  let mode = $state<'agent' | 'shell'>('agent')
+  let agentId = $state('')
   let prompt = $state('')
   let branch = $state<string | null>(null)
   let input = $state<HTMLInputElement>()
 
   const project = $derived(app.projects.find((p) => p.id === projectId) ?? app.projects[0])
-  const profile = $derived(app.profiles[profileIndex % Math.max(1, app.profiles.length)])
-  const isShell = $derived(!profile?.command.trim())
+  const agents = $derived(app.profiles.filter((p) => p.command.trim()))
+  const shellProfile = $derived(app.profiles.find((p) => !p.command.trim()))
+  const profile = $derived(mode === 'shell' && shellProfile ? shellProfile : (agents.find((a) => a.id === agentId) ?? agents[0]))
+  const isShell = $derived(mode === 'shell' && !!shellProfile)
+  // O seletor de agente começa no primeiro (os perfis podem carregar depois da tela).
+  $effect(() => {
+    if (!agents.some((a) => a.id === agentId) && agents[0]) agentId = agents[0].id
+  })
+  const CAPABILITIES = [
+    { glyph: '›', tone: 'accent', title: 'Falar com o agente', text: 'Peça em português; ele lê o projeto, propõe e executa.' },
+    { glyph: '!', tone: 'warning', title: 'Aprovar o que é arriscado', text: 'Comandos que alteram ou acessam a rede esperam seu ok, com o motivo e o risco.' },
+    { glyph: '⇉', tone: 'accent', title: 'Vários chats ao mesmo tempo', text: 'Lado a lado, com fila e broadcast. A bandeja avisa quem espera.' },
+  ]
   const recents = $derived(
     app.chats
       .filter((c) => c.lastActive)
@@ -48,7 +61,7 @@
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Tab' && !e.shiftKey && !prompt) {
       e.preventDefault()
-      profileIndex = (profileIndex + (e.shiftKey ? app.profiles.length - 1 : 1)) % app.profiles.length
+      if (shellProfile) mode = mode === 'agent' ? 'shell' : 'agent'
     } else if (e.key === 'Enter') {
       e.preventDefault()
       start()
@@ -89,6 +102,20 @@
     <h1 class="wordmark">kora<span class="cursor" aria-hidden="true"></span></h1>
     <p class="lead">Abra um projeto e diga ao agente o que fazer, ou rode comandos direto no shell.</p>
 
+    <div class="what">
+      <p class="overline">o que dá para fazer</p>
+      <button class="btn sm" onclick={() => (app.tourStep = 0)}>Fazer o tour · 1 min ›</button>
+    </div>
+    <div class="cards">
+      {#each CAPABILITIES as card (card.title)}
+        <div class="card">
+          <span class="card-glyph {card.tone}" aria-hidden="true">{card.glyph}</span>
+          <strong>{card.title}</strong>
+          <p>{card.text}</p>
+        </div>
+      {/each}
+    </div>
+
     <h2 class="title">nova sessão</h2>
 
     {#if app.projects.length === 0}
@@ -113,16 +140,19 @@
         <button class="btn ghost sm" onclick={openFolder}>Abrir nova pasta</button>
       </div>
 
-      <div class="prompt">
-        <button
-          class="mode"
-          class:shell={isShell}
-          title="Tab troca o agente"
-          onclick={() => (profileIndex = (profileIndex + 1) % app.profiles.length)}
-        >
-          {isShell ? 'shell' : profile?.name}
-        </button>
-        <span class="caret" aria-hidden="true">›</span>
+      <div class="prompt" data-tour="prompt">
+        <div class="segmented" role="radiogroup" aria-label="Agente ou shell">
+          <button role="radio" aria-checked={!isShell} class:on={!isShell} onclick={() => (mode = 'agent')} title="Falar com um agente (Tab alterna)">Agente</button>
+          {#if shellProfile}
+            <button role="radio" aria-checked={isShell} class:on={isShell} onclick={() => (mode = 'shell')} title="Abrir um shell (Tab alterna)">Shell</button>
+          {/if}
+        </div>
+        {#if !isShell && agents.length > 1}
+          <select class="agent" bind:value={agentId} aria-label="Qual agente" title="Qual agente">
+            {#each agents as a (a.id)}<option value={a.id}>{a.name}</option>{/each}
+          </select>
+        {/if}
+        <span class="caret" aria-hidden="true">{isShell ? '$' : '›'}</span>
         <input
           bind:this={input}
           bind:value={prompt}
@@ -161,7 +191,8 @@
 
     <div class="shortcuts">
       <span><Kbd keys={keysOf(app.settings.keys.palette)} /> paleta de comandos</span>
-      <span><Kbd keys={['Tab']} /> trocar agente (campo vazio)</span>
+      <span><Kbd keys={['Tab']} /> agente / shell (campo vazio)</span>
+      <span><Kbd keys={['?']} /> todos os atalhos</span>
       <span><Kbd keys={keysOf(app.settings.keys.settings)} /> configurações</span>
     </div>
   </div>
@@ -272,18 +303,69 @@
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
-  .mode {
-    padding: 1px var(--space-1);
+  .segmented {
+    display: inline-flex;
+    flex: none;
+    padding: 2px;
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius-md);
+  }
+  .segmented button {
+    height: 24px;
+    padding: 0 var(--space-3);
     border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  .segmented button.on {
     background: var(--accent-soft);
     color: var(--accent-strong);
-    font: 500 11px/16px var(--font-mono);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-weight: 500;
   }
-  .mode.shell {
-    background: var(--bg-300);
+  .agent {
+    height: 26px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--bg-200);
+    color: var(--ink);
+    font-size: 12px;
+  }
+  .what {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: var(--space-6);
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-3);
+    margin: var(--space-3) 0 var(--space-6);
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--bg-200);
+    font-size: 13px;
+  }
+  .card p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 18px;
     color: var(--ink-muted);
+  }
+  .card-glyph {
+    font: 600 14px var(--font-mono);
+  }
+  .card-glyph.accent {
+    color: var(--accent);
+  }
+  .card-glyph.warning {
+    color: var(--warning);
   }
   .caret {
     font: 600 13px var(--font-mono);

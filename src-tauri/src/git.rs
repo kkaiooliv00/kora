@@ -128,6 +128,22 @@ pub async fn git_diff(dir: String) -> Result<Changes, String> {
     Ok(Changes { status, diff })
 }
 
+/// "Desfazer alteração" de um arquivo: volta ao último commit; arquivo novo (fora do git) é apagado.
+#[tauri::command]
+pub async fn git_discard(dir: String, file: String) -> Result<(), String> {
+    if !crate::project::is_safe_relative(&file) {
+        return Err(format!("caminho não permitido: {file}"));
+    }
+    // O diff mostra caminhos a partir da raiz do repositório.
+    let root = git(&dir, &["rev-parse", "--show-toplevel"])?;
+    let root = root.trim();
+    let tracked = git(root, &["ls-files", "--error-unmatch", "--", &file]).is_ok();
+    if tracked {
+        return git(root, &["restore", "--source=HEAD", "--staged", "--worktree", "--", &file]).map(|_| ());
+    }
+    fs::remove_file(Path::new(root).join(&file)).map_err(|e| format!("não foi possível apagar {file}: {e}"))
+}
+
 /// Branch como argumento de git: sem `-` no começo (viraria opção) e só caracteres de ref comuns.
 fn valid_branch(branch: &str) -> Result<&str, String> {
     let ok = !branch.is_empty()

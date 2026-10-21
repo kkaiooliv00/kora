@@ -12,6 +12,7 @@ const MAX_MESSAGE: usize = 500;
 const MAX_TODOS: usize = 50;
 const MAX_TODO_TEXT: usize = 200;
 const MAX_PATH: usize = 500;
+const MAX_COMMAND: usize = 400;
 const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// O transcript cresce sem limite: o uso mais recente está no fim, então lê só a cauda.
 const TRANSCRIPT_TAIL: u64 = 256 * 1024;
@@ -74,6 +75,17 @@ pub fn detail(body: &str) -> Option<Value> {
                 out["file"] = json!(truncate(path, MAX_PATH));
             }
         }
+        // O que a ferramenta vai fazer: aprovação no rodapé do painel (comando, motivo, risco) e anti-loop.
+        let text = |key: &str, max: usize| hook.pointer(&format!("/tool_input/{key}")).and_then(Value::as_str).map(|v| json!(truncate(v, max)));
+        if let Some(command) = text("command", MAX_COMMAND) {
+            out["command"] = command;
+        }
+        if let Some(reason) = text("description", MAX_MESSAGE) {
+            out["reason"] = reason;
+        }
+        if let Some(target) = text("url", MAX_PATH).or_else(|| text("query", MAX_PATH)) {
+            out["target"] = target;
+        }
         if tool == "TodoWrite" {
             if let Some(list) = hook.pointer("/tool_input/todos") {
                 out["todos"] = todos(list);
@@ -103,6 +115,15 @@ mod tests {
         let note = detail(r#"{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}"#).unwrap();
         assert_eq!(note["message"], "Claude needs your permission to use Bash");
         assert!(detail("não é json").is_none());
+    }
+
+    #[test]
+    fn detail_keeps_command_reason_and_target() {
+        let bash = detail(r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"npm test","description":"Roda os testes"}}"#).unwrap();
+        assert_eq!(bash["command"], "npm test");
+        assert_eq!(bash["reason"], "Roda os testes");
+        let web = detail(r#"{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://x.dev"}}"#).unwrap();
+        assert_eq!(web["target"], "https://x.dev");
     }
 
     #[test]

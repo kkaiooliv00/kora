@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager, Runtime, UserAttentionType,
+    App, AppHandle, Emitter, Manager, Runtime, UserAttentionType,
 };
 
 const TRAY_ID: &str = "main";
@@ -65,6 +65,8 @@ pub fn setup(app: &App) -> tauri::Result<()> {
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
                 show_main(tray.app_handle());
+                // A interface abre o chat que espera você há mais tempo (se houver).
+                let _ = tray.app_handle().emit("tray-open", ());
             }
         });
     if let Some(image) = icon(app, false) {

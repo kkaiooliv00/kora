@@ -30,7 +30,12 @@
   import ToastStack from './ToastStack.svelte'
   import Menu from './Menu.svelte'
   import AgentPanel from './AgentPanel.svelte'
-  import ApprovalCard from './ApprovalCard.svelte'
+  import ApprovalBar from './ApprovalBar.svelte'
+  import Composer from './Composer.svelte'
+  import LoopCard from './LoopCard.svelte'
+  import Tooltip from './Tooltip.svelte'
+  import Shortcuts from './Shortcuts.svelte'
+  import Tour from './Tour.svelte'
   import {
     app,
     load,
@@ -41,18 +46,24 @@
     chatDir,
     whereOf,
     focusChat,
-    requestClosePane,
-    requestCloseTab,
-    popOut,
+    hidePane,
+    setLayout,
+    showSideBySide,
+    goToWaiting,
     runProject,
-    toggleDirection,
+    projectOf,
+    isOpen,
     STATUS,
     type Status,
     type HookDetail,
     type Chat,
     type Tab,
+    type Layout,
   } from './lib/state.svelte'
-  import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents } from './lib/automation'
+  import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents, resumeAllLoops } from './lib/automation'
+  import { openActiveInEditor } from './lib/automation'
+  import { terminals } from './lib/terminals'
+  import { contextPercent, formatTokens, usageToday, watchUsageToday } from './lib/stats.svelte'
   import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS, openPalette } from './lib/commands'
   import { menuState } from './lib/menu.svelte'
@@ -76,6 +87,10 @@
   const CHAT_ACTIONS = new Set(['search', 'split', 'closePane', 'queue', 'diff', 'prevPrompt', 'nextPrompt'])
   const REPEATABLE = new Set(['nextTab', 'prevTab', 'prevPrompt', 'nextPrompt'])
 
+  /** Foco num campo de texto ou no terminal: `?` é texto, não atalho. */
+  const typing = (target: EventTarget | null) =>
+    target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || !!target.closest('.xterm'))
+
   /** Atalhos globais: rodam antes do terminal receber a tecla. */
   function onKey(e: KeyboardEvent) {
     // Esc fecha qualquer modal aqui, na captura: se o foco estiver no terminal, o xterm engoliria a tecla.
@@ -83,6 +98,11 @@
       e.preventDefault()
       e.stopPropagation()
       app.modal = null
+      return
+    }
+    if (e.key === '?' && !e.ctrlKey && !e.altKey && !e.metaKey && !typing(e.target) && !app.modal) {
+      e.preventDefault()
+      app.modal = 'shortcuts'
       return
     }
     const combo = comboOf(e)
@@ -100,19 +120,24 @@
     load().then((ok) => {
       loaded = ok
       checkBudget()
+      // Primeira execução: o tour abre sozinho (refazer pela paleta, "Fazer o tour").
+      if (ok && !app.settings.tourDone) app.tourStep = 0
     })
     const listeners = [
       listen<{ chat: string; state: Status; session: string | null; detail: HookDetail | null }>('chat-status', ({ payload }) =>
         onHookStatus(payload.chat, payload.state, payload.session, payload.detail),
       ),
       listen<CliRequest>('kora-cli', ({ payload }) => handleCli(payload)),
+      listen('tray-open', goToWaiting),
       listen<string>('chat-checkpoint', ({ payload }) => (app.checkpointRev[payload] = (app.checkpointRev[payload] ?? 0) + 1)),
     ]
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('focusin', keepFocusInModal)
     const stopStats = watchStats()
     const stopBudget = watchBudget()
+    const stopUsage = watchUsageToday()
     return () => {
+      stopUsage()
       stopStats()
       stopBudget()
       window.removeEventListener('keydown', onKey, true)
@@ -176,6 +201,14 @@
   )
 
   function paneStyle(tab: Tab, index: number): string {
+    if (tab.layout === 'single') return 'left:0;top:0;width:100%;height:100%'
+    if (tab.layout === 'grid') {
+      const cols = Math.ceil(Math.sqrt(tab.panes.length))
+      const rows = Math.ceil(tab.panes.length / cols)
+      const w = 100 / cols
+      const h = 100 / rows
+      return `left:${(index % cols) * w}%;top:${Math.floor(index / cols) * h}%;width:${w}%;height:${h}%`
+    }
     const sizes = paneSizes(tab.sizes, tab.panes.length)
     const size = sizes[index]
     const start = sizes.slice(0, index).reduce((a, b) => a + b, 0)
@@ -244,11 +277,42 @@
     dialog.querySelector<HTMLElement>(FIELD_SELECTOR)?.focus() ?? dialog.querySelector<HTMLElement>('button')?.focus()
   }
 
-  let tabsEl = $state<HTMLElement>()
-  $effect(() => {
-    void app.activeTab
-    tabsEl?.querySelector('.tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  // Breadcrumb: projeto / grupo / chat (o grupo abre os chats dele lado a lado).
+  const crumbProject = $derived(activeChat ? projectOf(activeChat) : undefined)
+  const crumbGroup = $derived(activeChat ? (app.groups.find((g) => g.id === activeChat.groupId)?.name ?? activeChat.branch ?? branch ?? '') : '')
+  const groupMates = $derived.by(() => {
+    const chat = activeChat
+    if (!chat) return []
+    return app.chats
+      .filter((c) => !c.archived && c.projectId === chat.projectId)
+      .filter((c) => (chat.groupId ? c.groupId === chat.groupId : !c.groupId && (chat.branch ? c.branch === chat.branch : !c.branch)))
+      .map((c) => c.id)
   })
+  /** Vista com vários chats (mostra o seletor de layout); lado a lado só fora do "1 painel". */
+  const multi = $derived(hasTab && activeTabObj && activeTabObj.panes.length > 1 ? activeTabObj.panes.length : 0)
+  const sideBySide = $derived(multi && activeTabObj?.layout !== 'single' ? multi : 0)
+  const LAYOUTS: { id: Layout; label: string }[] = [
+    { id: 'single', label: '1 painel' },
+    { id: 'columns', label: 'Colunas' },
+    { id: 'grid', label: 'Grade' },
+  ]
+  const loopPaused = $derived(Object.keys(app.loopPaused).length)
+  const working = $derived(Object.values(app.status).filter((s) => s === 'running').length)
+  const memory = $derived(app.active ? contextPercent(app.agentInfo[app.active]) : undefined)
+  const model = $derived(app.active ? app.agentInfo[app.active]?.context?.model : undefined)
+  const isClaudeChat = $derived(activeProfile?.hooks === 'claude')
+
+  function revealProject() {
+    if (!crumbProject) return
+    app.collapsed[crumbProject.id] = false
+    document.querySelector(`[aria-label="${CSS.escape(crumbProject.name)}"]`)?.scrollIntoView({ block: 'nearest' })
+  }
+
+  /** "Trocar modelo" na barra de status: o /model do Claude, no chat em foco. */
+  function switchModel() {
+    if (!app.active || !isClaudeChat) return
+    terminals.get(app.active)?.submit('/model')
+  }
 
   const comboKeys = (combo: string | undefined) => (combo ? normalizeCombo(combo).split('+') : [])
 </script>
@@ -260,56 +324,48 @@
 
 <div class="app">
   <header class="topbar">
-    <button class="icon-btn glyph" class:on={!hasTab} title="Início" aria-label="Início" onclick={goHome}>
+    <button class="icon-btn glyph" class:on={!hasTab} title="Início (novo chat)" aria-label="Início" onclick={goHome}>
       <img src={glyph} alt="" width="18" height="18" />
     </button>
-    <nav class="tabs" aria-label="Sessões abertas" bind:this={tabsEl} onwheel={(e) => tabsEl && (tabsEl.scrollLeft += e.deltaY)}>
-      {#each app.tabs as tab (tab.id)}
-        {@const active = app.activeTab === tab.id}
-        <div class="tab" class:active>
-          <button
-            class="tab-label"
-            onclick={() => focusChat(tab.panes[0])}
-            title={tab.panes.map((id) => `${chatById(id)?.name}: ${STATUS[app.status[id] ?? 'idle'].label}`).join('\n')}
-          >
-            {#each tab.panes as id, i (id)}
-              {#if i > 0}<span class="sep" aria-hidden="true">│</span>{/if}
-              {@render dot(id)}
-              <span class="name">{chatById(id)?.name}</span>
-              {#if app.queue[id]?.pending.length}<span class="badge accent" title="Prompts na fila">{app.queue[id].pending.length} na fila</span>{/if}
-            {/each}
-          </button>
-          {#if tab.panes.length > 1 && active}
-            <button class="icon-btn" title="Alternar lado a lado / empilhado" aria-label="Alternar divisão" onclick={toggleDirection}>
-              {#if tab.vertical}<Columns2 size={14} strokeWidth={1.5} />{:else}<Rows2 size={14} strokeWidth={1.5} />{/if}
-            </button>
-          {/if}
-          <button class="icon-btn" title="Fechar (encerra os processos)" aria-label="Fechar aba" onclick={() => requestCloseTab(tab.id)}>
-            <X size={14} strokeWidth={1.5} />
-          </button>
-        </div>
-      {/each}
-      <button class="icon-btn add" title="Nova sessão" aria-label="Nova sessão" onclick={goHome}>
-        <Plus size={16} strokeWidth={1.5} />
-      </button>
+    <nav class="crumbs" aria-label="Onde você está">
+      {#if hasTab && activeChat}
+        {#if crumbProject}<button class="crumb" title="Mostrar o projeto na barra lateral" onclick={revealProject}>{crumbProject.name}</button>{/if}
+        {#if crumbGroup}
+          <span class="slash" aria-hidden="true">/</span>
+          <button class="crumb" title="Abrir os chats deste grupo lado a lado" onclick={() => showSideBySide(groupMates.filter(isOpen))}>{crumbGroup}</button>
+        {/if}
+        {#if sideBySide}
+          <span class="note">· {sideBySide} chats lado a lado</span>
+        {:else}
+          <span class="slash" aria-hidden="true">/</span>
+          <span class="crumb current">{activeChat.name}</span>
+        {/if}
+      {:else}
+        <span class="crumb current">nova sessão</span>
+      {/if}
     </nav>
     <div class="top-right">
-      {#if app.agentsPaused}<span class="badge warning">‖ pausado</span>{/if}
-      {#if waiting > 0}<span class="badge warning">! {waiting} aguardando você</span>{/if}
-      {#if branch}<span class="badge">{branch}</span>{/if}
-      {#if activeStatus === 'running'}<span class="badge accent">› agente ativo</span>{/if}
+      {#if multi}
+        <div class="segmented" role="radiogroup" aria-label="Layout dos painéis">
+          {#each LAYOUTS as l (l.id)}
+            <button role="radio" aria-checked={(activeTabObj?.layout ?? 'columns') === l.id} class:on={(activeTabObj?.layout ?? 'columns') === l.id} onclick={() => setLayout(l.id)}>{l.label}</button>
+          {/each}
+        </div>
+      {/if}
+      {#if loopPaused}<span class="badge warning" title="Chats pausados pelo anti-loop">‖ {loopPaused} {loopPaused === 1 ? 'pausado' : 'pausados'}</span>{/if}
+      {#if app.agentsPaused}<span class="badge warning" title="Mensagens entre agentes pausadas">‖ pausado</span>{/if}
+      {#if waiting > 0}
+        <button class="badge warning wait" title="Ir para quem espera há mais tempo ({normalizeCombo(app.settings.keys.waiting ?? '')})" onclick={goToWaiting}>! {waiting} aguardando você</button>
+      {/if}
       <button
         class="icon-btn"
         class:on={app.showPanel}
-        title="Painel do agente"
+        title="Painel do agente ({normalizeCombo(app.settings.keys.panel ?? '')})"
         aria-label="Mostrar painel do agente"
         aria-pressed={app.showPanel}
         onclick={() => (app.showPanel = !app.showPanel)}
       >
         <PanelRight size={16} strokeWidth={1.5} />
-      </button>
-      <button class="palette-hint" title="Paleta de comandos" onclick={() => openPalette()}>
-        <Kbd keys={comboKeys(app.settings.keys.palette)} />
       </button>
     </div>
   </header>
@@ -326,6 +382,22 @@
       </div>
       <button class="btn primary sm" onclick={resumeAgents}>Retomar</button>
     </div>
+  {:else if loopPaused}
+    <div class="paused-banner" role="alert">
+      <span class="paused-glyph" aria-hidden="true">‖</span>
+      <div>
+        <strong>Agentes pausados pelo anti-loop</strong>
+        <p>
+          {loopPaused} {loopPaused === 1 ? 'chat repetiu' : 'chats repetiram'} o mesmo comando {app.settings.loop.repeats} vezes em {app.settings.loop.minutes} min
+          sem mudar nenhum arquivo. Nada foi perdido; {loopPaused === 1 ? 'ele espera' : 'eles esperam'} você.
+        </p>
+      </div>
+      <button class="link" onclick={() => ((app.settingsSection = 'permissoes'), (app.modal = 'settings'))}>
+        Ajustar limite ({app.settings.loop.repeats} repetições em {app.settings.loop.minutes} min)
+      </button>
+      <button class="btn sm" onclick={() => { const first = Object.keys(app.loopPaused)[0]; if (first) focusChat(first) }}>Ver detalhes</button>
+      <button class="btn primary sm" onclick={resumeAllLoops}>Retomar todos</button>
+    </div>
   {/if}
 
   <div class="body" class:with-panel={showPanel} style:--side="{app.sidebarWidth}px">
@@ -340,48 +412,57 @@
 
     <main class="terms" bind:this={termsEl} style:--term-bg={themeOf(app.settings.theme).background}>
       {#each panes as { tab, index, chat } (chat.id)}
-        {@const visible = tab.id === app.activeTab}
-        {@const split = tab.panes.length > 1}
+        {@const single = tab.layout === 'single' && tab.panes.length > 1}
+        {@const visible = tab.id === app.activeTab && (!single || app.active === chat.id)}
+        {@const split = tab.panes.length > 1 && !single}
+        {@const focused = split && app.active === chat.id}
         <section
           class="pane"
           class:hidden={!visible}
           class:split
-          class:focused={split && app.active === chat.id}
+          class:focused
           style={paneStyle(tab, index)}
           aria-label={chat.name}
         >
           {#if split}
             {@const status = STATUS[app.status[chat.id] ?? 'idle']}
             <header>
-              {@render dot(chat.id)}
-              <span class="name">{chat.name}</span>
-              <span class="where">{whereOf(chat)}</span>
-              {#if app.status[chat.id] && app.status[chat.id] !== 'idle'}
-                <span class="badge {status.tone}">{status.glyph} {status.label}</span>
+              <span class="glyph-status" style:color={status.color} title={status.label}>{status.glyph}</span>
+              <span class="name" title={whereOf(chat)}>{chat.name}</span>
+              {#if app.loopPaused[chat.id]}
+                <span class="badge warning">‖ pausado</span>
+              {:else if app.status[chat.id] && app.status[chat.id] !== 'idle'}
+                <span class="badge {status.tone}" title={app.waitingSince[chat.id] ? `Aguardando há ${Math.max(1, Math.round((Date.now() - app.waitingSince[chat.id]) / 60_000))} min` : status.label}>{status.glyph} {status.label}</span>
               {/if}
+              {#if focused}<span class="badge accent">em foco</span>{/if}
+              <span class="spacer"></span>
               {#if !chat.runOf}
                 <button class="icon-btn" title="Rodar o projeto ao lado" aria-label="Rodar o projeto" onclick={() => runProject(chat.id)}>
                   <Play size={14} strokeWidth={1.5} />
                 </button>
               {/if}
-              <button class="icon-btn" title="Dividir com outro chat" aria-label="Dividir com outro chat" onclick={() => { focusChat(chat.id); openPalette('Dividir com ') }}>
+              <button class="icon-btn" title="Abrir outro chat ao lado ({normalizeCombo(app.settings.keys.split ?? '')})" aria-label="Dividir com outro chat" onclick={() => { focusChat(chat.id); openPalette('Dividir com ') }}>
                 <SplitIcon size={14} strokeWidth={1.5} />
               </button>
-              <button class="icon-btn" title="Maximizar em aba própria" aria-label="Maximizar em aba própria" onclick={() => popOut(chat.id)}>
+              <button class="icon-btn" title="Só este painel (1 painel)" aria-label="Maximizar" onclick={() => { focusChat(chat.id); setLayout('single') }}>
                 <Maximize size={14} strokeWidth={1.5} />
               </button>
-              <button class="icon-btn" title="Fechar (encerra o processo)" aria-label="Fechar" onclick={() => requestClosePane(chat.id)}>
+              <button class="icon-btn" title="Fechar painel; o chat continua na barra lateral ({normalizeCombo(app.settings.keys.closePane ?? '')})" aria-label="Fechar painel" onclick={() => hidePane(chat.id)}>
                 <X size={14} strokeWidth={1.5} />
               </button>
             </header>
           {/if}
           <div class="pane-body">
-            <Terminal {chat} {visible} />
-            <ApprovalCard chatId={chat.id} />
+            <div class="term-wrap">
+              <Terminal {chat} {visible} />
+            </div>
+            <LoopCard chatId={chat.id} />
+            <ApprovalBar chatId={chat.id} compact={split} />
+            <Composer chatId={chat.id} compact={split} />
           </div>
         </section>
       {/each}
-      {#if hasTab && activeTabObj && activeTabObj.panes.length > 1}
+      {#if hasTab && activeTabObj && activeTabObj.panes.length > 1 && (activeTabObj.layout ?? 'columns') === 'columns'}
         {#each activeTabObj.panes.slice(0, -1) as id, index (id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -400,13 +481,23 @@
   </div>
 
   <footer class="statusbar">
-    <span>{shortPath(activeDir)}</span>
-    {#if branch}<span>{branch}</span>{/if}
+    {#if hasTab && activeChat}
+      <button class="stat" title="Abrir a pasta no editor" onclick={openActiveInEditor}>{shortPath(activeDir)}</button>
+      {#if branch}<button class="stat" title="Ver mudanças ({normalizeCombo(app.settings.keys.diff ?? '')})" onclick={() => (app.modal = 'diff')}>{branch}</button>{/if}
+    {/if}
     <span class="spacer"></span>
-    {#if activeChat && activeStatus}
+    {#if hasTab && activeChat && activeStatus}
       <span style:color={STATUS[activeStatus].color}>{STATUS[activeStatus].glyph} {STATUS[activeStatus].label}</span>
     {/if}
-    {#if activeProfile}<span>[{activeProfile.name.toLowerCase()}]</span>{/if}
+    {#if hasTab && activeChat && isClaudeChat}
+      <button class="stat model" title="Trocar o modelo (/model no Claude)" onclick={switchModel}>[{model ?? activeProfile?.name.toLowerCase()}] ▾</button>
+      {#if memory !== undefined}
+        <button class="stat" title="Memória da conversa: quanto da janela de contexto já foi usado" onclick={() => (app.showPanel = true)}>memória {memory}%</button>
+      {/if}
+    {:else if hasTab && activeProfile}
+      <span>[{activeProfile.name.toLowerCase()}]</span>
+    {/if}
+    <button class="stat" title="Uso de tokens hoje ({normalizeCombo(app.settings.keys.usage ?? '')})" onclick={() => (app.modal = 'usage')}>uso hoje {formatTokens(usageToday.tokens)}</button>
   </footer>
 
   {#if app.modal === 'settings'}<Settings />{/if}
@@ -421,6 +512,9 @@
   {#if app.modal === 'compare'}<Compare />{/if}
   {#if app.modal === 'history'}<History />{/if}
   {#if app.modal === 'template'}<Template />{/if}
+  {#if app.modal === 'shortcuts'}<Shortcuts />{/if}
+  {#if app.tourStep !== null}<Tour />{/if}
+  <Tooltip />
 
   <ToastStack />
   <Menu />
@@ -447,20 +541,39 @@
   .glyph {
     flex: none;
   }
-  .tabs {
+  .crumbs {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: var(--space-2);
     flex: 1;
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-    /* Some nas bordas quando há abas fora da vista. */
-    mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 24px), transparent);
+    overflow: hidden;
+    white-space: nowrap;
+    font: 13px var(--font-mono);
+    color: var(--ink-muted);
+  }
+  .crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--ink-muted);
+  }
+  button.crumb:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .crumb.current {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .slash {
+    color: var(--line-control);
+  }
+  .note {
+    font: 12px var(--font-sans);
   }
   /* Painel estreito: os botões ficam; caminho e texto do status saem. */
   @container (max-width: 380px) {
-    .pane header .where,
     .pane header .badge {
       display: none;
     }
@@ -468,56 +581,37 @@
   .pane header .icon-btn {
     flex: none;
   }
-  .tab {
-    display: flex;
-    align-items: center;
-    flex: none;
-    max-width: 360px;
-    height: 28px;
-    padding-right: 2px;
+  .segmented {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--line-control);
     border-radius: var(--radius-md);
+  }
+  .segmented button {
+    height: 24px;
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
     color: var(--ink-muted);
-    transition: background-color 120ms ease-out;
   }
-  .tab:hover {
-    background: var(--bg-200);
-    color: var(--ink);
-  }
-  .tab.active {
+  .segmented button.on {
     background: var(--accent-soft);
     color: var(--accent-strong);
+    font-weight: 500;
   }
-  .tab-label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-    height: 100%;
-    padding: 0 var(--space-2) 0 var(--space-3);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    white-space: nowrap;
-    overflow: hidden;
+  .wait {
+    cursor: pointer;
   }
-  .tab .icon-btn {
-    width: 22px;
-    height: 22px;
-    color: inherit;
-    opacity: 0.6;
-  }
-  .tab .icon-btn:hover {
-    opacity: 1;
-  }
-  .add {
-    margin-left: var(--space-1);
+  .glyph-status {
+    flex: none;
+    width: 12px;
+    font: 600 13px var(--font-mono);
+    text-align: center;
   }
   .name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .sep {
-    color: var(--line-control);
   }
   .dot {
     flex: none;
@@ -531,10 +625,6 @@
     align-items: center;
     gap: var(--space-2);
     flex: none;
-  }
-  .palette-hint {
-    display: flex;
-    border-radius: var(--radius-sm);
   }
 
   /* ---- corpo ---- */
@@ -620,24 +710,20 @@
   }
   .pane header .name {
     flex: 0 1 auto;
-    min-width: 0;
+    min-width: 7ch;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 40%;
     font: 600 13px var(--font-mono);
     color: var(--ink);
   }
-  .where {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12px;
-    color: var(--ink-muted);
-  }
   .pane-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .term-wrap {
     position: relative;
     flex: 1;
     min-height: 0;
@@ -659,6 +745,25 @@
   }
   .spacer {
     flex: 1;
+  }
+  .stat {
+    height: 20px;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+    font: inherit;
+    color: inherit;
+  }
+  .stat:hover,
+  .stat:focus-visible {
+    background: var(--bg-200);
+    color: var(--ink);
+  }
+  .link {
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    white-space: nowrap;
   }
 
   /* ---- avisos flutuantes ---- */

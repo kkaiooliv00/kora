@@ -165,3 +165,14 @@ chat e por projeto (aviso + fila pausada).
 Navegar entre prompts (Ctrl+Shift+↑/↓) e copiar a última resposta, busca em todas as conversas do Claude,
 snippets com campos `{nome}`, arquivar chats e exportar conversa em Markdown, divisórias e barra lateral
 arrastáveis.
+
+## Fase 12 ✅ — handoff de UX (21/10), mantendo o terminal do agente
+
+Sem abas no topo: breadcrumb projeto / grupo / chat e seletor de layout (1 painel, Colunas, Grade);
+fechar painel não encerra o chat. Barra de ações embaixo de cada chat (Contexto @, Fila, Broadcast,
+Comandos, Atalhos). Aprovação no rodapé do painel com motivo, selos de risco e a regra que pediu
+(Recusar, Aprovar sempre, Aprovar uma vez). Dicas em todo botão com `title`, barra de status clicável,
+Ctrl+Shift+J / rodapé da barra / bandeja levando a quem espera há mais tempo, tela de atalhos (`?`),
+tour de 4 passos, boas-vindas com "O que dá para fazer", anti-loop por chat (mesmo comando N vezes em
+M minutos sem mudar arquivo) com "Retomar com instrução", memória da conversa com "Compactar conversa",
+"Desfazer alteração" por arquivo no diff e `> comando` na paleta.

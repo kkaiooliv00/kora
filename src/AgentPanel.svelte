@@ -3,14 +3,15 @@
   import { ask } from '@tauri-apps/plugin-dialog'
   import { app, chatById, chatDir, fail } from './lib/state.svelte'
   import { toast } from './lib/toasts.svelte'
+  import { terminals } from './lib/terminals'
   import { CATEGORIES, type Policy } from './lib/permissions'
   import EmptyState from './EmptyState.svelte'
   import { sharedWith } from './lib/automation'
   import { contextPercent, contextWindow, formatMemory, percent, procStats } from './lib/stats.svelte'
 
   const POLICY: Record<Policy, { text: string; tone: string }> = {
-    allow: { text: '✓ sempre', tone: 'success' },
-    ask: { text: '! perguntar', tone: 'warning' },
+    allow: { text: '✓ sem perguntar', tone: 'success' },
+    ask: { text: '! pergunta antes', tone: 'warning' },
     deny: { text: '✗ nunca', tone: 'danger' },
   }
   const TODO_GLYPH: Record<string, string> = { completed: '✓', in_progress: '…', pending: '·' }
@@ -64,6 +65,11 @@
     }
   }
 
+  /** O /compact do Claude resume a conversa e libera a memória. */
+  function compactConversation() {
+    if (app.active) terminals.get(app.active)?.submit('/compact')
+  }
+
   const compact = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 })
 </script>
 
@@ -95,7 +101,7 @@
     </section>
 
     <section>
-      <p class="overline">permissões</p>
+      <p class="overline">o que o agente pode fazer</p>
       <ul class="perms">
         {#each CATEGORIES as category (category.key)}
           {@const policy = POLICY[app.settings.permissions[category.key]]}
@@ -144,16 +150,19 @@
     </section>
 
     <section>
-      <p class="overline">contexto</p>
+      <p class="overline">memória da conversa</p>
       {#if info?.context}
-        <div class="meter" role="meter" aria-valuenow={contextPct} aria-valuemin={0} aria-valuemax={100} aria-label="Contexto usado">
-          <div style:width="{contextPct}%"></div>
+        <div class="meter" role="meter" aria-valuenow={contextPct} aria-valuemin={0} aria-valuemax={100} aria-label="Memória da conversa usada">
+          <div style:width="{contextPct}%" class:full={contextPct >= 80}></div>
         </div>
-        <p class="muted">
-          {contextPct}% da janela de contexto usada ({compact.format(info.context.tokens)} de {compact.format(windowSize)} tokens)
+        <p class="muted" title="{compact.format(info.context.tokens)} de {compact.format(windowSize)} tokens">
+          <strong>{contextPct}% usada.</strong> Quando enche, o agente começa a esquecer o início da conversa. Compacte para resumir o que já foi feito.
         </p>
+        <button class="btn sm compact-btn" onclick={compactConversation} disabled={app.status[chat.id] === 'running'} title="Manda /compact para o Claude">
+          Compactar conversa
+        </button>
       {:else}
-        <EmptyState kind="empty" title="Sem dados de contexto" compact>Aparece depois da primeira resposta do agente.</EmptyState>
+        <EmptyState kind="empty" title="Sem dados de memória" compact>Aparece depois da primeira resposta do agente.</EmptyState>
       {/if}
     </section>
   {/if}
@@ -281,5 +290,11 @@
   .meter div {
     height: 100%;
     background: var(--accent);
+  }
+  .meter div.full {
+    background: var(--warning);
+  }
+  .compact-btn {
+    align-self: flex-start;
   }
 </style>

@@ -45,6 +45,7 @@ pub fn run() {
             git::git_commit,
             git::git_merge,
             git::git_pr,
+            git::git_discard,
             project::worktree_setup,
             project::free_port,
             tray::set_waiting,

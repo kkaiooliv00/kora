@@ -7,7 +7,7 @@ import { dismiss, toast } from './toasts.svelte'
 import type { Queue } from './queue'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare' | 'history' | 'template'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare' | 'history' | 'template' | 'shortcuts'
 
 export interface Profile {
   id: string
@@ -89,12 +89,18 @@ export interface Settings {
   permissions: Permissions
   /** Limite diário de tokens (entrada + saída); 0 = sem limite. Passou: aviso e fila pausada. */
   budget: { chatTokens: number; projectTokens: number }
+  /** Anti-loop: o mesmo comando `repeats` vezes em `minutes` minutos, sem mudar arquivo, pausa o chat. */
+  loop: { repeats: number; minutes: number }
+  /** Tour de primeiro uso concluído ou pulado. */
+  tourDone: boolean
 }
 /** Do hook do Claude: plano (TodoWrite), pedido de permissão em aberto e uso de contexto. */
 export interface AgentInfo {
   todos?: { content: string; status: string }[]
   permission?: string
   context?: { tokens: number; model: string }
+  /** A última ferramenta que o agente quis usar (o que a aprovação mostra). */
+  pending?: { tool: string; command?: string; reason?: string; target?: string; file?: string }
 }
 
 /** Resumo de um evento de hook (montado em src-tauri/src/hooks.rs). */
@@ -108,6 +114,10 @@ export interface HookDetail {
   file?: string
   /** O Kora criou um ponto de restauração antes deste prompt. */
   checkpoint?: boolean
+  /** Comando do Bash, motivo (description) e alvo (URL, busca) da ferramenta. */
+  command?: string
+  reason?: string
+  target?: string
 }
 
 /** Uma aba com um ou mais chats lado a lado. */
@@ -117,7 +127,11 @@ export interface Tab {
   vertical: boolean
   /** Tamanho de cada painel em %, na ordem de `panes` (vazio = divisão igual). */
   sizes?: number[]
+  /** Como os chats da vista aparecem: um só (o em foco), em colunas ou em grade. */
+  layout?: Layout
 }
+
+export type Layout = 'single' | 'columns' | 'grid'
 
 /** Estado nunca só por cor: cada um tem glifo e palavra (regra do design). */
 export const STATUS: Record<Status, { label: string; glyph: string; color: string; tone: string }> = {
@@ -140,7 +154,7 @@ const DEFAULT_PROFILES: Profile[] = [
 ]
 
 const LEGACY_FONT = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
-const SETTINGS_VERSION = 2
+const SETTINGS_VERSION = 3
 
 const DEFAULT_SETTINGS: Settings = {
   version: SETTINGS_VERSION,
@@ -152,6 +166,8 @@ const DEFAULT_SETTINGS: Settings = {
   keys: DEFAULT_KEYS,
   permissions: DEFAULT_PERMISSIONS,
   budget: { chatTokens: 0, projectTokens: 0 },
+  loop: { repeats: 6, minutes: 3 },
+  tourDone: false,
   snippets: [
     { name: 'Revisar mudanças', text: 'Revise as mudanças não commitadas e aponte bugs e riscos.' },
     {
@@ -185,6 +201,16 @@ export const app = $state({
   touched: {} as Record<string, string[]>,
   /** Projeto aberto no modal de configuração. */
   editingProject: null as string | null,
+  /** Desde quando cada chat espera você (para ir ao que espera há mais tempo). */
+  waitingSince: {} as Record<string, number>,
+  /** Chats pausados pelo anti-loop: o comando repetido e quantas vezes. */
+  loopPaused: {} as Record<string, { command: string; count: number; from: number; to: number }>,
+  /** Arquivos que você pôs no contexto pelo botão "@ Contexto", por chat. */
+  context: {} as Record<string, string[]>,
+  /** Chat com o motivo e a regra da aprovação abertos (painel compacto, Ctrl+Shift+I). */
+  showReason: null as string | null,
+  /** Tour de primeiro uso aberto (passo atual). */
+  tourStep: null as number | null,
   /** Muda quando um chat ganha ponto de restauração (o painel recarrega a lista). */
   checkpointRev: {} as Record<string, number>,
   /** Snippet com campos `{nome}` esperando os valores. */
@@ -240,6 +266,7 @@ export async function load(): Promise<boolean> {
       permissions: { ...DEFAULT_PERMISSIONS, ...config?.settings?.permissions },
       version: config?.settings?.version ?? 1,
       budget: { ...DEFAULT_SETTINGS.budget, ...config?.settings?.budget },
+      loop: { ...DEFAULT_SETTINGS.loop, ...config?.settings?.loop },
     })
     app.projects = state?.projects ?? []
     app.groups = state?.groups ?? []
@@ -255,14 +282,20 @@ export async function load(): Promise<boolean> {
 
 /** Quem ainda estava nos padrões antigos (Grafite, Cascadia 14) passa para o tema Kora. */
 function migrateSettings(settings: Settings): Settings {
-  if ((settings.version ?? 1) >= SETTINGS_VERSION) return settings
-  return {
-    ...settings,
-    version: SETTINGS_VERSION,
-    theme: settings.theme === 'Grafite' ? DEFAULT_SETTINGS.theme : settings.theme,
-    fontFamily: settings.fontFamily === LEGACY_FONT ? DEFAULT_SETTINGS.fontFamily : settings.fontFamily,
-    fontSize: settings.fontSize === 14 ? DEFAULT_SETTINGS.fontSize : settings.fontSize,
+  const from = settings.version ?? 1
+  if (from >= SETTINGS_VERSION) return settings
+  let next = settings
+  if (from < 2) {
+    next = {
+      ...next,
+      theme: next.theme === 'Grafite' ? DEFAULT_SETTINGS.theme : next.theme,
+      fontFamily: next.fontFamily === LEGACY_FONT ? DEFAULT_SETTINGS.fontFamily : next.fontFamily,
+      fontSize: next.fontSize === 14 ? DEFAULT_SETTINGS.fontSize : next.fontSize,
+    }
   }
+  // v3: Ctrl+Shift+A virou "Aprovar sempre"; o painel de agentes foi para outro atalho.
+  if (from < 3 && next.keys.agents === 'Ctrl+Shift+A') next = { ...next, keys: { ...next.keys, agents: DEFAULT_KEYS.agents } }
+  return { ...next, version: SETTINGS_VERSION }
 }
 
 /** O que vai para state.json: árvore + abas abertas (reabertas na próxima vez). */
@@ -369,6 +402,27 @@ async function prepareWorktree(project: Project, dir: string) {
   } finally {
     if (id) dismiss(id)
   }
+}
+
+/** `> comando` na paleta: abre um shell ao lado do chat em foco (na pasta dele) e roda o comando. */
+export function runInShell(command: string) {
+  const source = app.active ? chatById(app.active) : undefined
+  const projectId = source?.projectId ?? app.projects[0]?.id
+  const shell = app.profiles.find((p) => !p.command.trim())
+  if (!projectId || !shell || !command.trim()) return fail('Shell', 'abra um projeto e tenha um perfil de shell em Configurações → Agentes')
+  const chat: Chat = {
+    id: uid(),
+    name: `$ ${command.trim().slice(0, 30)}`,
+    profileId: shell.id,
+    projectId,
+    groupId: source?.groupId,
+    cwd: source?.cwd,
+    branch: source?.branch,
+  }
+  app.chats.push(chat)
+  app.pendingPrompt[chat.id] = command.trim()
+  if (source && isOpen(source.id)) splitChat(chat.id)
+  else openChat(chat.id)
 }
 
 /** Abre um shell ao lado do chat, na mesma pasta, rodando o comando do projeto (`{port}` = porta livre). */
@@ -509,7 +563,11 @@ export async function restartChat(id: string, fresh: boolean) {
 export const tabOf = (id: string) => app.tabs.find((t) => t.panes.includes(id))
 export const isOpen = (id: string) => tabOf(id) !== undefined
 /** Chat na aba em foco (o resto está "fora da vista" e recebe avisos em toast). */
-export const isVisible = (id: string) => tabOf(id)?.id === app.activeTab
+/** Na tela: a vista ativa, e no layout "1 painel" só o chat em foco. */
+export const isVisible = (id: string) => {
+  const tab = tabOf(id)
+  return tab?.id === app.activeTab && (tab.layout !== 'single' || tab.panes.length === 1 || app.active === id)
+}
 export const openIds = () => app.tabs.flatMap((t) => t.panes)
 
 export function focusChat(id: string) {
@@ -556,6 +614,8 @@ export function closePane(id: string) {
   delete app.status[id]
   delete app.queue[id]
   delete app.agentInfo[id]
+  delete app.waitingSince[id]
+  delete app.loopPaused[id]
   if (app.searching === id) app.searching = null
   if (app.active !== id) return
   const next = tabOf(tab.panes.find((p) => p !== id) ?? '') ?? app.tabs[Math.min(index, app.tabs.length - 1)]
@@ -601,4 +661,39 @@ export function cycleTab(step: number) {
 
 export function toggleDirection() {
   app.tabs = app.tabs.map((t) => (t.id === app.activeTab ? { ...t, vertical: !t.vertical } : t))
+}
+
+export function setLayout(layout: Layout) {
+  app.tabs = app.tabs.map((t) => (t.id === app.activeTab ? { ...t, layout, sizes: undefined } : t))
+}
+
+/**
+ * "Fechar painel" não encerra o chat: numa vista com vários, ele sai da divisão e segue rodando
+ * numa vista própria (a um clique na barra lateral); sozinho, volta para a tela inicial.
+ */
+export function hidePane(id: string) {
+  const tab = tabOf(id)
+  if (!tab) return
+  if (tab.panes.length === 1) {
+    app.activeTab = null
+    return
+  }
+  const rest = tab.panes.filter((p) => p !== id)
+  app.tabs = [...withoutPane(app.tabs, id), { id: uid(), panes: [id], vertical: false }]
+  focusChat(rest[0])
+}
+
+/** Os chats já abertos de um grupo, lado a lado (o breadcrumb e "Ver todos" do grupo). */
+export function showSideBySide(ids: string[]) {
+  const open = ids.filter(isOpen)
+  if (open.length < 2) return open[0] && focusChat(open[0])
+  app.tabs = [...app.tabs.filter((t) => !t.panes.every((p) => open.includes(p))).map((t) => ({ ...t, panes: t.panes.filter((p) => !open.includes(p)), sizes: undefined })).filter((t) => t.panes.length > 0), { id: uid(), panes: open, vertical: false, layout: 'columns' }]
+  app.activeTab = app.tabs.at(-1)?.id ?? null
+  app.active = open[0]
+}
+
+/** O chat que espera você há mais tempo (rodapé da barra lateral, Ctrl+Shift+J, clique na bandeja). */
+export function goToWaiting() {
+  const oldest = Object.entries(app.waitingSince).sort((a, b) => a[1] - b[1])[0]?.[0]
+  if (oldest && chatById(oldest)) openChat(oldest)
 }

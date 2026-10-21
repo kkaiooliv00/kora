@@ -2,7 +2,7 @@
   import { untrack } from 'svelte'
   import Search from '@lucide/svelte/icons/search'
   import Kbd from './Kbd.svelte'
-  import { app } from './lib/state.svelte'
+  import { app, runInShell } from './lib/state.svelte'
   import { buildCommands, GROUPS, highlight, matches, type Command } from './lib/commands'
   import { normalizeCombo } from './lib/keys'
 
@@ -14,11 +14,22 @@
   let list = $state<HTMLDivElement>()
 
   const commands = buildCommands()
+  // "> comando" vira um comando do shell, rodado ao lado do chat em foco.
+  const shellCommand = $derived(query.startsWith('>') ? query.slice(1).trim() : '')
   const groups = $derived(
-    GROUPS.map((group) => ({
-      group,
-      items: commands.filter((c) => c.group === group && matches(c.label, query)).slice(0, MAX_PER_GROUP),
-    })).filter((g) => g.items.length > 0),
+    query.startsWith('>')
+      ? [
+          {
+            group: GROUPS[0],
+            items: shellCommand
+              ? [{ id: 'shell', group: GROUPS[0], label: `Rodar no shell: ${shellCommand}`, mono: true, run: () => runInShell(shellCommand) } as Command]
+              : [],
+          },
+        ].filter((g) => g.items.length > 0)
+      : GROUPS.map((group) => ({
+          group,
+          items: commands.filter((c) => c.group === group && matches(c.label, query)).slice(0, MAX_PER_GROUP),
+        })).filter((g) => g.items.length > 0),
   )
   const flat = $derived(groups.flatMap((g) => g.items))
 
@@ -103,7 +114,9 @@
     <footer>
       <span><Kbd keys={['↑']} /><Kbd keys={['↓']} /> navegar</span>
       <span><Kbd keys={['↵']} /> abrir</span>
+      <span class="mono">&gt; comandos do shell</span>
       <span class="spacer"></span>
+      <span><Kbd keys={['?']} /> todos os atalhos</span>
       <span class="mono">{flat.length} {flat.length === 1 ? 'resultado' : 'resultados'}</span>
     </footer>
   </div>

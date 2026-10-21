@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { app, type AgentInfo } from './state.svelte'
 import { terminals } from './terminals'
+import { between, startOfDay, totalOf, type UsageRow } from './usage'
 
 const POLL_MS = 3000
 
@@ -57,3 +58,25 @@ export function contextPercent(info: AgentInfo | undefined): number | undefined 
 }
 
 export const chatsOpen = () => app.chats.filter((c) => terminals.has(c.id))
+
+// ---- uso de hoje (barra de status) ----
+
+const USAGE_POLL_MS = 5 * 60_000
+/** Tokens (entrada + saída) de hoje em todos os agentes, lidos dos logs locais. */
+export const usageToday = $state({ tokens: 0 })
+const tokens = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 2 })
+export const formatTokens = (n: number) => tokens.format(n)
+
+export function watchUsageToday(): () => void {
+  const tick = async () => {
+    try {
+      const { rows } = await invoke<{ rows: UsageRow[] }>('usage_summary', { days: 1 })
+      usageToday.tokens = between(rows, startOfDay(0), Date.now() + 1).reduce((n, r) => n + totalOf(r.tokens), 0)
+    } catch {
+      // Sem logs ainda: fica 0.
+    }
+  }
+  const timer = setInterval(tick, USAGE_POLL_MS)
+  tick()
+  return () => clearInterval(timer)
+}

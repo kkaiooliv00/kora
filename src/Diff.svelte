@@ -40,6 +40,18 @@
     }
   }
 
+  /** Volta um arquivo ao último commit (arquivo novo: apaga). Pergunta antes: não dá para desfazer. */
+  async function discard(path: string) {
+    if (!dir) return
+    if (!(await ask(`Desfazer as mudanças em ${path}? O arquivo volta ao último commit; isso não pode ser desfeito.`, { title: 'Desfazer alteração', kind: 'warning' }))) return
+    await act('Desfazer', async () => {
+      await invoke('git_discard', { dir, file: path })
+      if (chat) app.touched[chat.id] = (app.touched[chat.id] ?? []).filter((f) => f !== path)
+      toast({ tone: 'success', title: 'Alteração desfeita', text: path })
+      await refresh()
+    })
+  }
+
   const commit = () =>
     act('Commit', async () => {
       const line = await invoke<string>('git_commit', { dir, message })
@@ -168,6 +180,7 @@
             <span class="path">{file.path}</span>
             <span class="count-add">+{file.added}</span>
             <span class="count-del">-{file.removed}</span>
+            <button class="link" onclick={() => discard(file.path)} title="Volta este arquivo ao último commit">Desfazer alteração</button>
           </div>
           {#if file.binary}
             <p class="note">arquivo binário</p>
@@ -264,6 +277,12 @@
   }
   .count-add {
     color: var(--success);
+  }
+  .link {
+    font: 12px var(--font-sans);
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   .count-del {
     color: var(--danger);

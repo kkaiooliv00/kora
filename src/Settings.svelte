@@ -28,6 +28,7 @@
   let section = $state<Section>(requested ?? 'geral')
   let draft = $state({ ...app.settings })
   let budget = $state({ ...app.settings.budget })
+  let loop = $state({ ...app.settings.loop })
   const preview = $derived(themeOf(draft.theme))
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
@@ -101,6 +102,10 @@
       keys,
       snippets,
       permissions: $state.snapshot(permissions),
+      loop: {
+        repeats: Math.min(50, Math.max(2, Math.round(Number(loop.repeats) || 6))),
+        minutes: Math.min(60, Math.max(1, Math.round(Number(loop.minutes) || 3))),
+      },
       budget: {
         chatTokens: Math.max(0, Math.round(Number(budget.chatTokens) || 0)),
         projectTokens: Math.max(0, Math.round(Number(budget.projectTokens) || 0)),
@@ -245,6 +250,21 @@
         <h3>Sempre bloqueados</h3>
         <p class="perm-help">Recusados mesmo se você aprovar tudo.</p>
         {@render chips('denyCommands', 'git push --force*')}
+
+        <h3 class="sub">anti-loop</h3>
+        <p class="perm-help">
+          Pausa o chat que repetir o mesmo comando sem mudar nenhum arquivo. Os outros chats continuam; você retoma como está ou com uma instrução.
+        </p>
+        <div class="loop-fields">
+          <label class="field">
+            Repetições
+            <input type="number" min="2" max="50" bind:value={loop.repeats} />
+          </label>
+          <label class="field">
+            Em quantos minutos
+            <input type="number" min="1" max="60" bind:value={loop.minutes} />
+          </label>
+        </div>
 
         <div class="section-actions">
           <button class="btn ghost" onclick={() => (permissions = structuredClone(DEFAULT_PERMISSIONS))}>Restaurar padrão</button>
@@ -489,6 +509,15 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+  .sub {
+    margin: var(--space-8) 0 var(--space-2);
+    font: 600 14px var(--font-mono);
+  }
+  .loop-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 200px));
+    gap: var(--space-4);
   }
   .key-row {
     display: grid;

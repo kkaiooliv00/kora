@@ -14,6 +14,7 @@
     moveChat,
     openChat,
     runProject,
+    goToWaiting,
     archiveChat,
     splitChat,
     closePane,
@@ -23,6 +24,7 @@
     type Project,
   } from './lib/state.svelte'
   import { openInEditor } from './lib/automation'
+  import { normalizeCombo } from './lib/keys'
   import { exportChat } from './lib/export'
   import Archive from '@lucide/svelte/icons/archive'
   import { openMenu, type MenuItem } from './lib/menu.svelte'
@@ -367,6 +369,12 @@
     {#if selected}
       <ul>
         {#each view.chats as chat (chat.id)}{@render chatRow(chat)}{/each}
+        <li class="chat new-chat">
+          <button class="chat-btn" onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: view.groupId })} title="Novo chat neste grupo">
+            <span class="glyph" aria-hidden="true">+</span>
+            <span class="chat-name">Novo chat neste grupo</span>
+          </button>
+        </li>
       </ul>
     {/if}
   </div>
@@ -427,7 +435,7 @@
   </section>
 {/snippet}
 
-<aside>
+<aside data-tour="sidebar">
   <header>
     <span class="title">Projetos</span>
     <button class="icon-btn" title="Configurações" aria-label="Configurações" onclick={() => (app.modal = 'settings')}><Settings {...ICON} /></button>
@@ -445,10 +453,15 @@
     {/if}
   </div>
 
-  <footer>
-    <span class="work-dot" aria-hidden="true"></span>
-    {working} {working === 1 ? 'agente trabalhando' : 'agentes trabalhando'}
-    {#if waiting}<span class="waiting" title="aguardando você">! {waiting}</span>{/if}
+  <footer data-tour="waiting">
+    {#if waiting}
+      <button class="wait-btn" title="Ir para quem espera há mais tempo ({normalizeCombo(app.settings.keys.waiting ?? '')})" onclick={goToWaiting}>
+        <span aria-hidden="true">!</span> {waiting} aguardando você <span class="go" aria-hidden="true">›</span>
+      </button>
+    {:else}
+      <span class="idle-note">ninguém esperando você</span>
+    {/if}
+    <span class="working" title="{working} {working === 1 ? 'agente trabalhando' : 'agentes trabalhando'}"><span aria-hidden="true">›</span> {working}</span>
   </footer>
 </aside>
 
@@ -796,15 +809,35 @@
     font-size: 12px;
     color: var(--ink-muted);
   }
-  .work-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 1px;
-    background: var(--accent);
-  }
-  .waiting {
-    margin-left: auto;
-    font-family: var(--font-mono);
+  .wait-btn {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-2);
+    height: 28px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-md);
+    background: var(--warning-soft);
     color: var(--warning);
+    font-size: 12px;
+    text-align: left;
+  }
+  .wait-btn .go {
+    margin-left: auto;
+  }
+  .wait-btn:hover {
+    filter: brightness(1.15);
+  }
+  .idle-note {
+    flex: 1;
+  }
+  .working {
+    font-family: var(--font-mono);
+    color: var(--accent);
+  }
+  .new-chat .chat-name,
+  .new-chat .glyph {
+    color: var(--ink-muted);
   }
 </style>
