@@ -74,6 +74,9 @@
 <style>
   .approval {
     flex: none;
+    min-width: 0;
+    max-height: 50%;
+    overflow-y: auto;
     margin: 0 var(--space-3) var(--space-2);
     border: 1px solid var(--line-control);
     border-radius: var(--radius-md);
@@ -107,6 +110,10 @@
     color: var(--warning);
     white-space: nowrap;
   }
+  .compact .who,
+  .compact .state {
+    display: none;
+  }
   .why {
     display: flex;
     align-items: flex-start;
@@ -127,6 +134,7 @@
   }
   footer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-4);

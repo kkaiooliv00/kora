@@ -50,6 +50,9 @@
     setLayout,
     showSideBySide,
     goToWaiting,
+    placeInView,
+    layoutOf,
+    CHAT_DRAG,
     runProject,
     projectOf,
     isOpen,
@@ -200,9 +203,17 @@
     ),
   )
 
+  /** Largura da área dos terminais (para o layout automático). */
+  let termsWidth = $state(0)
+  const MIN_PANE_PX = 360
+  /** O layout escolhido; sem escolha, colunas enquanto cada uma tiver 360px, senão grade. */
+  const effectiveLayout = (tab: Tab): Layout =>
+    tab.layout ?? (tab.panes.length > 1 && termsWidth / tab.panes.length < MIN_PANE_PX ? 'grid' : layoutOf(tab))
+
   function paneStyle(tab: Tab, index: number): string {
-    if (tab.layout === 'single') return 'left:0;top:0;width:100%;height:100%'
-    if (tab.layout === 'grid') {
+    const layout = effectiveLayout(tab)
+    if (layout === 'single') return 'left:0;top:0;width:100%;height:100%'
+    if (layout === 'grid') {
       const cols = Math.ceil(Math.sqrt(tab.panes.length))
       const rows = Math.ceil(tab.panes.length / cols)
       const w = 100 / cols
@@ -290,7 +301,43 @@
   })
   /** Vista com vários chats (mostra o seletor de layout); lado a lado só fora do "1 painel". */
   const multi = $derived(hasTab && activeTabObj && activeTabObj.panes.length > 1 ? activeTabObj.panes.length : 0)
-  const sideBySide = $derived(multi && activeTabObj?.layout !== 'single' ? multi : 0)
+  const sideBySide = $derived(multi && activeTabObj && effectiveLayout(activeTabObj) !== 'single' ? multi : 0)
+
+  // ---- arrastar chats: da barra lateral para a área dos terminais, ou um painel para outro lugar ----
+  /** Arrastando um chat por cima da área (mostra o aviso de soltar). */
+  let dropping = $state(false)
+  /** Painel sob o cursor: o chat entra logo depois dele. */
+  let dropAfter = $state<string | null>(null)
+  const isChatDrag = (e: DragEvent) => !!e.dataTransfer?.types.includes(CHAT_DRAG)
+
+  function onDragOver(e: DragEvent, paneId: string | null = null) {
+    if (!isChatDrag(e)) return
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    dropping = true
+    dropAfter = paneId
+  }
+
+  function onDragLeave(e: DragEvent) {
+    const into = e.relatedTarget
+    if (into instanceof Node && termsEl?.contains(into)) return
+    dropping = false
+    dropAfter = null
+  }
+
+  function onDrop(e: DragEvent) {
+    if (!isChatDrag(e)) return
+    e.preventDefault()
+    const id = e.dataTransfer?.getData(CHAT_DRAG)
+    if (id) placeInView(id, dropAfter ?? undefined)
+    dropping = false
+    dropAfter = null
+  }
+
+  function onPaneDragStart(e: DragEvent, id: string) {
+    e.dataTransfer?.setData(CHAT_DRAG, id)
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+  }
   const LAYOUTS: { id: Layout; label: string }[] = [
     { id: 'single', label: '1 painel' },
     { id: 'columns', label: 'Colunas' },
@@ -348,7 +395,8 @@
       {#if multi}
         <div class="segmented" role="radiogroup" aria-label="Layout dos painéis">
           {#each LAYOUTS as l (l.id)}
-            <button role="radio" aria-checked={(activeTabObj?.layout ?? 'columns') === l.id} class:on={(activeTabObj?.layout ?? 'columns') === l.id} onclick={() => setLayout(l.id)}>{l.label}</button>
+            {@const current = activeTabObj ? effectiveLayout(activeTabObj) : 'columns'}
+            <button role="radio" aria-checked={current === l.id} class:on={current === l.id} onclick={() => setLayout(l.id)}>{l.label}</button>
           {/each}
         </div>
       {/if}
@@ -410,9 +458,17 @@
       ondblclick={() => (app.sidebarWidth = SIDEBAR.default)}
     ></div>
 
-    <main class="terms" bind:this={termsEl} style:--term-bg={themeOf(app.settings.theme).background}>
+    <main
+      class="terms"
+      bind:this={termsEl}
+      bind:clientWidth={termsWidth}
+      style:--term-bg={themeOf(app.settings.theme).background}
+      ondragover={(e) => onDragOver(e)}
+      ondragleave={onDragLeave}
+      ondrop={onDrop}
+    >
       {#each panes as { tab, index, chat } (chat.id)}
-        {@const single = tab.layout === 'single' && tab.panes.length > 1}
+        {@const single = effectiveLayout(tab) === 'single' && tab.panes.length > 1}
         {@const visible = tab.id === app.activeTab && (!single || app.active === chat.id)}
         {@const split = tab.panes.length > 1 && !single}
         {@const focused = split && app.active === chat.id}
@@ -421,12 +477,20 @@
           class:hidden={!visible}
           class:split
           class:focused
+          class:drop-target={dropping && visible && dropAfter === chat.id}
           style={paneStyle(tab, index)}
           aria-label={chat.name}
+          ondragover={(e) => {
+            if (!visible) return
+            onDragOver(e, chat.id)
+            e.stopPropagation()
+          }}
         >
           {#if split}
             {@const status = STATUS[app.status[chat.id] ?? 'idle']}
-            <header>
+            <!-- Arrastar o cabeçalho muda o painel de lugar (solte em outro painel). -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <header draggable="true" ondragstart={(e) => onPaneDragStart(e, chat.id)} title="Arraste para mudar de lugar">
               <span class="glyph-status" style:color={status.color} title={status.label}>{status.glyph}</span>
               <span class="name" title={whereOf(chat)}>{chat.name}</span>
               {#if app.loopPaused[chat.id]}
@@ -462,7 +526,12 @@
           </div>
         </section>
       {/each}
-      {#if hasTab && activeTabObj && activeTabObj.panes.length > 1 && (activeTabObj.layout ?? 'columns') === 'columns'}
+      {#if dropping}
+        <div class="drop-hint" aria-hidden="true">
+          <span>{hasTab ? 'Solte para abrir ao lado' : 'Solte para abrir o chat'}</span>
+        </div>
+      {/if}
+      {#if hasTab && activeTabObj && activeTabObj.panes.length > 1 && effectiveLayout(activeTabObj) === 'columns'}
         {#each activeTabObj.panes.slice(0, -1) as id, index (id)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -686,6 +755,7 @@
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+    overflow: hidden;
   }
   .pane.hidden {
     display: none;
@@ -696,6 +766,39 @@
   }
   .pane.focused {
     border-color: var(--accent);
+  }
+  .pane.drop-target::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--accent);
+    z-index: 6;
+  }
+  .pane header[draggable='true'] {
+    cursor: grab;
+  }
+  .drop-hint {
+    position: absolute;
+    inset: var(--space-3);
+    display: grid;
+    place-items: end center;
+    padding-bottom: var(--space-8);
+    border: 2px dashed var(--accent);
+    border-radius: var(--radius-lg);
+    background: rgb(60 200 212 / 0.06);
+    pointer-events: none;
+    z-index: 5;
+  }
+  .drop-hint span {
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--bg-200);
+    color: var(--accent-strong);
+    font-size: 13px;
+    box-shadow: var(--shadow-pop);
   }
   .pane header {
     display: flex;

@@ -15,6 +15,7 @@
     openChat,
     runProject,
     goToWaiting,
+    CHAT_DRAG,
     archiveChat,
     splitChat,
     closePane,
@@ -288,7 +289,13 @@
       <button
         class="chat-btn"
         draggable="true"
-        ondragstart={() => (dragged = chat.id)}
+        ondragstart={(e) => {
+          dragged = chat.id
+          // Soltar na área dos terminais abre ao lado; soltar num grupo da barra move o chat.
+          e.dataTransfer?.setData(CHAT_DRAG, chat.id)
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copyMove'
+        }}
+        ondragend={() => (dragged = null)}
         onclick={(e) => (e.altKey ? splitChat(chat.id) : openChat(chat.id))}
         ondblclick={() => setTimeout(() => (renaming = chat.id), RENAME_AFTER_OPEN_MS)}
         oncontextmenu={(e) => chatMenu(e, chat)}

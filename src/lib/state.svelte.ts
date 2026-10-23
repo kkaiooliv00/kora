@@ -598,6 +598,33 @@ export function splitChat(id: string) {
   focusChat(id)
 }
 
+/** Tipo do arrastar de chats (barra lateral → área dos terminais, cabeçalho → outro painel). */
+export const CHAT_DRAG = 'application/x-kora-chat'
+
+/**
+ * Soltar um chat na área dos terminais: entra na vista em foco, ao lado de `after` (ou no fim),
+ * sem limite de painéis. Se já está na vista, só muda de lugar. Na tela inicial, abre sozinho.
+ */
+export function placeInView(id: string, after?: string) {
+  if (!chatById(id)) return
+  const target = app.tabs.find((t) => t.id === app.activeTab)
+  if (!target) return openChat(id)
+  const rest = target.panes.filter((p) => p !== id)
+  const at = after && after !== id ? rest.indexOf(after) + 1 : rest.length
+  const panes = [...rest.slice(0, at || rest.length), id, ...rest.slice(at || rest.length)]
+  // "1 painel" mostraria só um: soltar outro chat é pedir lado a lado.
+  const layout = target.layout === 'single' ? undefined : target.layout
+  app.tabs = withoutPane(app.tabs, id)
+    .filter((t) => t.id !== target.id)
+    .concat({ ...target, panes, layout, sizes: undefined })
+  app.activeTab = target.id
+  updateChat(id, { lastActive: Date.now(), archived: false })
+  focusChat(id)
+}
+
+/** Layout em uso: o escolhido, ou colunas até 3 chats e grade a partir de 4. */
+export const layoutOf = (tab: Tab): Layout => tab.layout ?? (tab.panes.length > 3 ? 'grid' : 'columns')
+
 /** Tira o chat da divisão e põe numa aba só dele. */
 export function popOut(id: string) {
   if ((tabOf(id)?.panes.length ?? 0) < 2) return
