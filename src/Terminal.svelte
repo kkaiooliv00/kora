@@ -88,6 +88,11 @@
 
   function clipboardKeys(t: Terminal) {
     return (e: KeyboardEvent) => {
+      // xterm manda \r no Shift+Enter (igual ao Enter); ESC+\r é a quebra de linha que a TUI entende.
+      if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.type === 'keydown') t.input('\x1b\r')
+        return false
+      }
       if (e.type !== 'keydown' || !e.ctrlKey || e.altKey) return true
       const key = e.key.toLowerCase()
       if (key === 'v') return false
