@@ -710,10 +710,10 @@ export function hidePane(id: string) {
   focusChat(rest[0])
 }
 
-/** Os chats já abertos de um grupo, lado a lado (o breadcrumb e "Ver todos" do grupo). */
+/** Os chats de um grupo, lado a lado; os fechados abrem junto, os arquivados ficam de fora (breadcrumb e menu do grupo). */
 export function showSideBySide(ids: string[]) {
-  const open = ids.filter(isOpen)
-  if (open.length < 2) return open[0] && focusChat(open[0])
+  const open = ids.filter((id) => app.chats.some((c) => c.id === id && !c.archived))
+  if (open.length < 2) return open[0] && openChat(open[0])
   app.tabs = [...app.tabs.filter((t) => !t.panes.every((p) => open.includes(p))).map((t) => ({ ...t, panes: t.panes.filter((p) => !open.includes(p)), sizes: undefined })).filter((t) => t.panes.length > 0), { id: uid(), panes: open, vertical: false, layout: 'columns' }]
   app.activeTab = app.tabs.at(-1)?.id ?? null
   app.active = open[0]

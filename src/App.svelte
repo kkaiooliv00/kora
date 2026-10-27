@@ -379,7 +379,7 @@
         {#if crumbProject}<button class="crumb" title="Mostrar o projeto na barra lateral" onclick={revealProject}>{crumbProject.name}</button>{/if}
         {#if crumbGroup}
           <span class="slash" aria-hidden="true">/</span>
-          <button class="crumb" title="Abrir os chats deste grupo lado a lado" onclick={() => showSideBySide(groupMates.filter(isOpen))}>{crumbGroup}</button>
+          <button class="crumb" title="Abrir os chats deste grupo lado a lado" onclick={() => showSideBySide(groupMates)}>{crumbGroup}</button>
         {/if}
         {#if sideBySide}
           <span class="note">· {sideBySide} chats lado a lado</span>
