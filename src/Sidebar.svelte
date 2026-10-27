@@ -19,6 +19,7 @@
     archiveChat,
     splitChat,
     closePane,
+    showSideBySide,
     isOpen,
     mostUrgent,
     type Chat,
@@ -218,6 +219,7 @@
             { separator: true },
           ]
         : []),
+      { label: 'Abrir lado a lado', disabled: view.chats.length < 2, run: () => showSideBySide(view.chats.map((c) => c.id)) },
       { label: 'Novo chat no grupo', submenu: newChatItems(project.id, groupId) },
       { label: 'Renomear grupo', run: () => (renaming = groupId) },
       { separator: true },
