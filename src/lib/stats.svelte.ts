@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import { app, type AgentInfo } from './state.svelte'
+import { listen } from '@tauri-apps/api/event'
+import { app, type AgentInfo, type Profile } from './state.svelte'
 import { terminals } from './terminals'
 import { between, startOfDay, totalOf, type UsageRow } from './usage'
 
@@ -66,6 +67,46 @@ const USAGE_POLL_MS = 5 * 60_000
 export const usageToday = $state({ tokens: 0 })
 const tokens = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 2 })
 export const formatTokens = (n: number) => tokens.format(n)
+
+// ---- limites de uso da assinatura (barra de status) ----
+
+const LIMITS_POLL_MS = 60_000
+export type LimitWindow = { label: string; percent: number; resetsAt: number | null }
+/** % usado de cada janela (5h, semana) por agente: Claude pela statusline, Codex pelos logs. */
+export const usageLimits = $state<Partial<Record<LimitSource, LimitWindow[]>>>({})
+export type LimitSource = 'claude' | 'codex'
+
+/** Agente cujo limite o Kora consegue ler, pelo perfil do chat. */
+export function limitSource(profile: Profile | undefined): LimitSource | undefined {
+  if (profile?.hooks === 'claude') return 'claude'
+  if (profile?.command.trim().split(/\s+/)[0] === 'codex') return 'codex'
+  return undefined
+}
+
+export function watchUsageLimits(): () => void {
+  const unlisten = listen<{ source: LimitSource; windows: LimitWindow[] }>('usage-limits', ({ payload }) => {
+    usageLimits[payload.source] = payload.windows
+  })
+  const tick = async () => {
+    try {
+      const windows = await invoke<LimitWindow[] | null>('codex_limits')
+      if (windows) usageLimits.codex = windows
+    } catch {
+      // Sem Codex ou sem log: a barra só não aparece.
+    }
+  }
+  const timer = setInterval(tick, LIMITS_POLL_MS)
+  tick()
+  return () => {
+    clearInterval(timer)
+    unlisten.then((stop) => stop())
+  }
+}
+
+const time = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+/** "42% da janela de 5h · renova ter., 14:30". */
+export const describeLimit = (w: LimitWindow) =>
+  `${Math.round(w.percent)}% da janela de ${w.label}` + (w.resetsAt ? ` · renova ${time.format(new Date(w.resetsAt * 1000))}` : '')
 
 export function watchUsageToday(): () => void {
   const tick = async () => {

@@ -12,7 +12,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tiny_http::{Request, Response, Server};
 
 const STATES: [&str; 3] = ["running", "waiting", "idle"];
@@ -54,6 +54,8 @@ struct CliEvent {
 enum Route {
     Status { chat: String, state: String },
     Cli(String),
+    /// JSON da statusline do Claude (limites de uso), vindo do `kora-cli statusline`.
+    Limits,
 }
 
 fn random_token() -> String {
@@ -88,7 +90,7 @@ pub fn start(app: AppHandle) -> Result<Api, Box<dyn Error>> {
     Ok(Api { port, token, bridge })
 }
 
-/// Aceita só `/status/<chat>/<estado>` e `/cli/<comando>`, sempre com `?t=<token>`.
+/// Aceita só `/status/<chat>/<estado>`, `/cli/<comando>` e `/limits`, sempre com `?t=<token>`.
 fn route(url: &str, token: &str) -> Option<Route> {
     let (path, query) = url.split_once('?')?;
     if query != format!("t={token}") {
@@ -100,6 +102,7 @@ fn route(url: &str, token: &str) -> Option<Route> {
             Some(Route::Status { chat: chat.to_string(), state: state.to_string() })
         }
         ["cli", kind] if CLI_KINDS.contains(kind) => Some(Route::Cli(kind.to_string())),
+        ["limits"] => Some(Route::Limits),
         _ => None,
     }
 }
@@ -155,6 +158,14 @@ fn handle(app: &AppHandle, token: &str, bridge: &Bridge, mut req: Request) {
             let (code, text) = ask_frontend(app, bridge, kind, body, from);
             let _ = req.respond(Response::from_string(text).with_status_code(code));
         }
+        Route::Limits => {
+            if let Some(windows) = crate::limits::claude(&body) {
+                let _ = app.emit("usage-limits", serde_json::json!({ "source": "claude", "windows": windows }));
+            }
+            // A resposta é a statusline do usuário, que o `kora-cli` roda em seguida.
+            let command = app.path().home_dir().map(|home| crate::limits::user_statusline(&home)).unwrap_or_default();
+            let _ = req.respond(Response::from_string(command));
+        }
     }
 }
 
@@ -201,6 +212,8 @@ mod tests {
         assert_eq!(route("/status/ab-12/hacked?t=tok", "tok"), None);
         assert_eq!(route("/status/a%2F/idle?t=tok", "tok"), None);
         assert_eq!(route("/cli/rm?t=tok", "tok"), None);
+        assert_eq!(route("/limits?t=tok", "tok"), Some(Route::Limits));
+        assert_eq!(route("/limits?t=bad", "tok"), None);
         assert_eq!(route("/status/ab/idle/x?t=tok", "tok"), None);
     }
 
