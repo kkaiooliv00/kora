@@ -4,6 +4,7 @@ mod files;
 mod git;
 mod history;
 mod hooks;
+mod limits;
 mod project;
 mod pty;
 mod stats;
@@ -55,7 +56,8 @@ pub fn run() {
             history::search_history,
             history::conversation_markdown,
             history::save_text,
-            usage::usage_summary
+            usage::usage_summary,
+            limits::codex_limits
         ])
         .build(tauri::generate_context!())
         .expect("falha ao iniciar o Kora")

@@ -95,7 +95,9 @@ pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String, permission
             "PostToolUse": hook("running"),
             "Notification": hook("waiting"),
             "Stop": hook("idle"),
-        }
+        },
+        // Só a statusline recebe os limites de uso; o kora-cli avisa o Kora e roda a statusline do usuário.
+        "statusLine": { "type": "command", "command": "kora-cli statusline", "padding": 0 },
     });
     let settings = match permissions {
         Some(rules) => {

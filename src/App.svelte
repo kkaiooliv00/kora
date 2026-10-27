@@ -56,6 +56,7 @@
     runProject,
     projectOf,
     isOpen,
+    openIds,
     STATUS,
     type Status,
     type HookDetail,
@@ -66,7 +67,17 @@
   import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents, resumeAllLoops } from './lib/automation'
   import { openActiveInEditor } from './lib/automation'
   import { terminals } from './lib/terminals'
-  import { contextPercent, formatTokens, usageToday, watchUsageToday } from './lib/stats.svelte'
+  import {
+    contextPercent,
+    describeLimit,
+    formatTokens,
+    limitSource,
+    usageLimits,
+    usageToday,
+    watchUsageLimits,
+    watchUsageToday,
+    type LimitSource,
+  } from './lib/stats.svelte'
   import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS, openPalette } from './lib/commands'
   import { menuState } from './lib/menu.svelte'
@@ -139,8 +150,10 @@
     const stopStats = watchStats()
     const stopBudget = watchBudget()
     const stopUsage = watchUsageToday()
+    const stopLimits = watchUsageLimits()
     return () => {
       stopUsage()
+      stopLimits()
       stopStats()
       stopBudget()
       window.removeEventListener('keydown', onKey, true)
@@ -348,6 +361,19 @@
   const memory = $derived(app.active ? contextPercent(app.agentInfo[app.active]) : undefined)
   const model = $derived(app.active ? app.agentInfo[app.active]?.context?.model : undefined)
   const isClaudeChat = $derived(activeProfile?.hooks === 'claude')
+  /** Limite de uso dos agentes com chat aberto; a barra mostra a janela mais cheia de cada um. */
+  const LIMIT_NAMES: Record<LimitSource, string> = { claude: 'claude', codex: 'codex' }
+  const limitsInUse = $derived.by(() => {
+    const open = new Set(openIds())
+    const sources = new Set(app.chats.filter((c) => open.has(c.id)).map((c) => limitSource(app.profiles.find((p) => p.id === c.profileId))))
+    return (Object.keys(LIMIT_NAMES) as LimitSource[])
+      .filter((source) => sources.has(source) && usageLimits[source]?.length)
+      .map((source) => {
+        const windows = usageLimits[source]!
+        const fullest = windows.reduce((a, b) => (b.percent > a.percent ? b : a))
+        return { source, name: LIMIT_NAMES[source], fullest, title: windows.map(describeLimit).join('\n') }
+      })
+  })
 
   function revealProject() {
     if (!crumbProject) return
@@ -566,6 +592,14 @@
     {:else if hasTab && activeProfile}
       <span>[{activeProfile.name.toLowerCase()}]</span>
     {/if}
+    {#each limitsInUse as limit (limit.source)}
+      {@const level = limit.fullest.percent >= 90 ? 'danger' : limit.fullest.percent >= 70 ? 'warning' : 'ok'}
+      <span class="limit {level}" title="Limite de uso do {limit.name}:&#10;{limit.title}">
+        {limit.name} {limit.fullest.label}
+        <span class="limit-track" aria-hidden="true"><span class="limit-fill" style:width="{limit.fullest.percent}%"></span></span>
+        {Math.round(limit.fullest.percent)}%
+      </span>
+    {/each}
     <button class="stat" title="Uso de tokens hoje ({normalizeCombo(app.settings.keys.usage ?? '')})" onclick={() => (app.modal = 'usage')}>uso hoje {formatTokens(usageToday.tokens)}</button>
   </footer>
 
@@ -860,6 +894,30 @@
   .stat:focus-visible {
     background: var(--bg-200);
     color: var(--ink);
+  }
+  .limit {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    --limit: var(--accent);
+  }
+  .limit.warning {
+    --limit: var(--warning);
+  }
+  .limit.danger {
+    --limit: var(--danger);
+  }
+  .limit-track {
+    width: 48px;
+    height: 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-300);
+    overflow: hidden;
+  }
+  .limit-fill {
+    display: block;
+    height: 100%;
+    background: var(--limit);
   }
   .link {
     font-size: 12px;

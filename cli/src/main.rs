@@ -6,7 +6,8 @@ use std::{
     env,
     io::{self, Read, Write},
     net::TcpStream,
-    process::ExitCode,
+    path::PathBuf,
+    process::{Command, ExitCode, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -45,11 +46,15 @@ impl Api {
     }
 
     fn call(&self, kind: &str, body: &str) -> Result<String, String> {
+        self.post(&format!("/cli/{kind}"), body)
+    }
+
+    fn post(&self, path: &str, body: &str) -> Result<String, String> {
         let mut stream =
             TcpStream::connect(("127.0.0.1", self.port)).map_err(|e| format!("o Kora não respondeu ({e}); ele está aberto?"))?;
         let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
         let request = format!(
-            "POST /cli/{kind}?t={token} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Kora-From: {from}\r\n\
+            "POST {path}?t={token} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Kora-From: {from}\r\n\
              Content-Type: text/plain; charset=utf-8\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
             token = self.token,
             from = self.from,
@@ -91,12 +96,61 @@ fn wait(api: &Api, chat: &str, timeout: Duration) -> Result<String, String> {
     }
 }
 
+/// O shell em que o Claude Code roda a statusline: Git Bash no Windows (cmd se não houver), `sh` no resto.
+fn shell(command: &str) -> Command {
+    if cfg!(windows) {
+        let git_bash = env::var_os("CLAUDE_CODE_GIT_BASH_PATH")
+            .map(PathBuf::from)
+            .or_else(|| env::var_os("ProgramFiles").map(|p| PathBuf::from(p).join(r"Git\bin\bash.exe")))
+            .filter(|p| p.exists());
+        if let Some(bash) = git_bash {
+            let mut cmd = Command::new(bash);
+            cmd.args(["-c", command]);
+            return cmd;
+        }
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/d", "/c", command]);
+        cmd
+    } else {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", command]);
+        cmd
+    }
+}
+
+/// Statusline do Claude no Kora: manda o JSON (limites de uso) ao Kora, que devolve a statusline
+/// do usuário; ela roda com o mesmo JSON e a saída dela é a que aparece.
+fn statusline() -> Result<String, String> {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input).map_err(|e| e.to_string())?;
+    // Kora fechado ou lento não pode apagar a statusline: sem resposta, segue sem a do usuário.
+    let command = Api::from_env().and_then(|api| api.post("/limits", &input)).unwrap_or_default();
+    let command = command.trim();
+    if command.is_empty() {
+        return Ok(String::new());
+    }
+    let mut child = shell(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("statusline: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input.as_bytes());
+    }
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 fn run(args: &[String]) -> Result<String, String> {
     let Some((command, rest)) = args.split_first() else {
         return Err(USAGE.into());
     };
     if matches!(command.as_str(), "help" | "-h" | "--help") {
         return Ok(USAGE.into());
+    }
+    if command == "statusline" {
+        return statusline();
     }
     let api = Api::from_env()?;
     match (command.as_str(), rest) {
