@@ -106,6 +106,8 @@ export interface AgentInfo {
 /** Resumo de um evento de hook (montado em src-tauri/src/hooks.rs). */
 export interface HookDetail {
   event: string
+  /** Motivo do SessionEnd (clear, logout, prompt_input_exit, other). */
+  endReason?: string
   message?: string
   tool?: string
   todos?: { content: string; status: string }[]

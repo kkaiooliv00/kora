@@ -92,6 +92,9 @@ pub fn detail(body: &str) -> Option<Value> {
             }
         }
     }
+    if let Some(reason) = hook.get("reason").and_then(Value::as_str).filter(|_| event == "SessionEnd") {
+        out["endReason"] = json!(truncate(reason, 40));
+    }
     if event == "Stop" {
         if let Some(context) = hook.get("transcript_path").and_then(Value::as_str).and_then(|p| context_usage(Path::new(p))) {
             out["context"] = context;

@@ -8,6 +8,7 @@ import {
   isOpen,
   isVisible,
   openChat,
+  profileOf,
   projectOf,
   updateChat,
   type Chat,
@@ -94,7 +95,11 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   if (idleNotice && (previous === 'idle' || previous === 'done' || previous === undefined)) return
   setStatus(id, status)
   const chat = chatById(id)
-  if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
+  // Terminal: saiu do claude por vontade própria (/exit, /clear, logout) → não retoma ao reabrir.
+  // "other" (Kora fechando, terminal morto) mantém a sessão para retomar.
+  const leftClaude = detail?.event === 'SessionEnd' && detail.endReason !== 'other' && !!chat && !profileOf(chat)?.command
+  if (chat && leftClaude) updateChat(id, { sessionId: undefined })
+  else if (chat && session && chat.sessionId !== session) updateChat(id, { sessionId: session })
   updateAgentInfo(id, status, detail)
   if (!chat) return
   if (detail?.file) noteTouched(chat, detail.file)

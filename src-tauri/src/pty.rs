@@ -1,7 +1,8 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::{
     collections::HashMap,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
+    fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
@@ -13,7 +14,7 @@ use std::{
 use crate::api::{is_valid_id, Api};
 use tauri::{
     ipc::{Channel, InvokeResponseBody},
-    State,
+    AppHandle, State,
 };
 
 const READ_BUF: usize = 16 * 1024;
@@ -157,27 +158,58 @@ fn agent_command(program: &str, args: &[String]) -> Result<CommandBuilder, Strin
 
 /// Variáveis que o `kora-cli` usa, e a pasta do Kora (onde ele está instalado) no fim do PATH,
 /// para nunca sombrear comandos do sistema.
-fn kora_env(builder: &mut CommandBuilder, api: &Api, chat: Option<&str>) {
+/// `shim` (o `claude.cmd` do Terminal) vai no começo do PATH: precisa vencer o `claude` instalado.
+fn kora_env(builder: &mut CommandBuilder, api: &Api, chat: Option<&str>, shim: Option<PathBuf>) {
     builder.env("KORA_PORT", api.port.to_string());
     builder.env("KORA_TOKEN", &api.token);
     if let Some(chat) = chat.filter(|c| is_valid_id(c)) {
         builder.env("KORA_CHAT_ID", chat);
     }
-    let Some(app_dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) else {
-        return;
-    };
+    let app_dir = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
     let path = std::env::var_os("PATH").unwrap_or_default();
-    if let Ok(joined) = std::env::join_paths(std::env::split_paths(&path).chain(std::iter::once(app_dir))) {
+    let dirs = shim.into_iter().chain(std::env::split_paths(&path)).chain(app_dir);
+    if let Ok(joined) = std::env::join_paths(dirs) {
         builder.env("PATH", joined);
     }
+}
+
+/// Linha do `claude.cmd` do Terminal: chama o `claude` instalado com os hooks do chat (`--settings`).
+/// Caminhos no nome curto 8.3: o cmd lê o .cmd na página de código OEM e quebra acento.
+fn shim_line(claude: &Path, settings: &OsStr) -> String {
+    let quoted = |p: &OsStr| format!("\"{}\"", short_path(p).to_string_lossy());
+    let ext = claude.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    let run = match ext.as_str() {
+        "cmd" | "bat" => format!("call {}", quoted(claude.as_os_str())),
+        "ps1" => format!("powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File {}", quoted(claude.as_os_str())),
+        _ => quoted(claude.as_os_str()),
+    };
+    format!("@{run} --settings {} %*
+", quoted(settings))
+}
+
+/// Num chat de Terminal, o `claude` digitado no shell avisa o Kora (status e sessão), que então
+/// consegue retomar a conversa ao reabrir. Sem claude instalado (ou fora do Windows), segue sem.
+fn claude_shim(app: &AppHandle, api: State<'_, Api>, chat: &str) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let claude = find_executable("claude", std::env::split_paths(&path_var))?;
+    let settings = crate::files::claude_settings(app.clone(), api, chat.to_string(), None).ok()?;
+    let dir = std::env::temp_dir().join("kora-shim").join(chat);
+    fs::create_dir_all(&dir).ok()?;
+    fs::write(dir.join("claude.cmd"), shim_line(&claude, OsStr::new(&settings))).ok()?;
+    Some(dir)
 }
 
 // async: o ConPTY (e o antivírus olhando o processo novo) não seguram a janela.
 #[tauri::command]
 pub async fn pty_spawn(
+    app: AppHandle,
     state: State<'_, Ptys>,
     api: State<'_, Api>,
     chat: Option<String>,
+    terminal_hooks: Option<bool>,
     program: Option<String>,
     args: Option<Vec<String>>,
     cwd: Option<String>,
@@ -199,7 +231,11 @@ pub async fn pty_spawn(
     }
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
-    kora_env(&mut builder, &api, chat.as_deref());
+    let shim = match (&chat, terminal_hooks) {
+        (Some(chat), Some(true)) if is_valid_id(chat) => claude_shim(&app, api.clone(), chat),
+        _ => None,
+    };
+    kora_env(&mut builder, &api, chat.as_deref(), shim);
 
     let mut child = pair.slave.spawn_command(builder).map_err(|e| e.to_string())?;
     drop(pair.slave);
@@ -280,7 +316,20 @@ pub fn pids(state: &Ptys, ids: &[u32]) -> Vec<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_executable;
+    use super::{find_executable, shim_line};
+    use std::{ffi::OsStr, path::Path};
+
+    #[test]
+    fn shim_line_calls_claude_with_settings() {
+        let settings = OsStr::new("C:/nao/existe/hooks/c1.json");
+        assert_eq!(
+            shim_line(Path::new("C:/nao/existe/claude.exe"), settings),
+            "@\"C:/nao/existe/claude.exe\" --settings \"C:/nao/existe/hooks/c1.json\" %*
+"
+        );
+        assert!(shim_line(Path::new("C:/x/claude.cmd"), settings).starts_with("@call \"C:/x/claude.cmd\""));
+        assert!(shim_line(Path::new("C:/x/claude.ps1"), settings).contains("-File \"C:/x/claude.ps1\""));
+    }
     use std::fs;
 
     #[test]

@@ -95,6 +95,8 @@ pub fn claude_settings(app: AppHandle, api: State<Api>, chat: String, permission
             "PostToolUse": hook("running"),
             "Notification": hook("waiting"),
             "Stop": hook("idle"),
+            // Num Terminal, sair do claude (/exit) faz o Kora parar de retomá-lo ao reabrir.
+            "SessionEnd": hook("idle"),
         },
         // Só a statusline recebe os limites de uso; o kora-cli avisa o Kora e roda a statusline do usuário.
         "statusLine": { "type": "command", "command": "kora-cli statusline", "padding": 0 },

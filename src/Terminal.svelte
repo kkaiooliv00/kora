@@ -163,6 +163,8 @@
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined
     // Começo da saída de um `claude --resume`, para reconhecer "No conversation found".
     let resumeOutput = ''
+    /** Primeira abertura de um chat de Terminal: retoma o claude que rodava nele. */
+    let resumeInShell = true
     const decoder = new TextDecoder()
     // Depois do unmount o processo ainda manda saída/saída-de-exit; ignorar para não ressuscitar o status.
     let disposed = false
@@ -254,7 +256,9 @@
         .then(({ program, args, resumed: isResume }) => {
           resumed = isResume
           resumeOutput = ''
-          return invoke<number>('pty_spawn', { chat: chat.id, program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit })
+          // Terminal: o `claude` digitado nele avisa a sessão ao Kora (ver claude_shim no pty.rs).
+          const terminalHooks = !program && !shellOnly && !profile?.command
+          return invoke<number>('pty_spawn', { chat: chat.id, terminalHooks, program, args, cwd, cols: t.cols, rows: t.rows, onData, onExit })
         })
         .then((pty) => {
           // O chat fechou (ou outro start começou) enquanto o processo abria: não deixa órfão.
@@ -264,6 +268,10 @@
           }
           id = pty
           setStatus(chat.id, 'idle')
+          // Terminal que tinha um claude aberto: retoma a conversa quando o shell sossegar (só ao abrir o Kora/chat).
+          const session = chatById(chat.id)?.sessionId
+          if (resumeInShell && !profile?.command && session) app.pendingPrompt[chat.id] = `claude --resume ${session}`
+          resumeInShell = false
         })
         .catch((e) => {
           if (disposed || gen !== generation) return
