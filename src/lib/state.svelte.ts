@@ -7,7 +7,7 @@ import { dismiss, toast } from './toasts.svelte'
 import type { Queue } from './queue'
 
 export type Status = 'idle' | 'running' | 'waiting' | 'done' | 'error'
-export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare' | 'history' | 'template' | 'shortcuts'
+export type Modal = 'palette' | 'broadcast' | 'queue' | 'settings' | 'diff' | 'usage' | 'project' | 'agents' | 'board' | 'compare' | 'history' | 'template' | 'shortcuts' | 'file'
 
 export interface Profile {
   id: string
@@ -222,6 +222,8 @@ export const app = $state({
   /** Prompts esperando o agente ficar pronto, por chat. */
   queue: {} as Record<string, Queue>,
   modal: null as Modal | null,
+  /** Arquivo aberto no visualizador (modal 'file'), relativo a `root`. */
+  viewFile: null as { root: string; path: string } | null,
   /** Seção em que as Configurações abrem (ex.: agentes, a partir de um erro). */
   settingsSection: null as string | null,
   paletteQuery: '',

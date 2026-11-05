@@ -72,7 +72,7 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   editor: { label: 'Abrir projeto no editor', run: openActiveInEditor },
   diff: { label: 'Ver mudanças do chat em foco', run: () => (app.modal = 'diff') },
   usage: { label: 'Uso de tokens', run: () => (app.modal = 'usage') },
-  panel: { label: 'Mostrar ou esconder o painel do agente', run: () => (app.showPanel = !app.showPanel) },
+  panel: { label: 'Mostrar ou esconder o painel de arquivos', run: () => (app.showPanel = !app.showPanel) },
   settings: { label: 'Configurações', run: () => (app.modal = 'settings') },
   agents: { label: 'Painel de todos os agentes', run: () => (app.modal = 'agents') },
   prevPrompt: { label: 'Ir ao prompt anterior', run: () => app.active && terminals.get(app.active)?.jumpPrompt(-1) },
