@@ -55,7 +55,9 @@
   }
   const TICK_MS = 30_000
 
-  type Adding = { kind: 'chat' | 'group'; projectId: string; groupId?: string }
+  /** `inGroup`: aberto pelo card do grupo. O grupo principal não tem groupId, então sem isso o menu
+   * do projeto e o do card principal abriam juntos. */
+  type Adding = { kind: 'chat' | 'group'; projectId: string; groupId?: string; inGroup?: boolean }
 
   let adding = $state<Adding | null>(null)
   let draftName = $state('')
@@ -102,7 +104,8 @@
   const focus = (node: HTMLInputElement) => node.focus()
 
   function toggle(next: Adding) {
-    const same = adding?.kind === next.kind && adding.projectId === next.projectId && adding.groupId === next.groupId
+    const same =
+      adding?.kind === next.kind && adding.projectId === next.projectId && adding.groupId === next.groupId && !!adding.inGroup === !!next.inGroup
     adding = same ? null : next
     draftName = ''
     app.collapsed[next.projectId] = false
@@ -265,8 +268,8 @@
   </form>
 {/snippet}
 
-{#snippet picker(projectId: string, groupId?: string)}
-  {#if adding?.projectId === projectId && adding.groupId === groupId}
+{#snippet picker(projectId: string, groupId?: string, inGroup = false)}
+  {#if adding?.projectId === projectId && adding.groupId === groupId && !!adding.inGroup === inGroup}
     {#if adding.kind === 'chat'}
       <div class="picker">
         {#each app.profiles as profile (profile.id)}
@@ -374,12 +377,12 @@
         </button>
       {/if}
     </div>
-    {@render picker(project.id, view.groupId)}
+    {@render picker(project.id, view.groupId, true)}
     {#if selected}
       <ul>
         {#each view.chats as chat (chat.id)}{@render chatRow(chat)}{/each}
         <li class="chat new-chat">
-          <button class="chat-btn" onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: view.groupId })} title="Novo chat neste grupo">
+          <button class="chat-btn" onclick={() => toggle({ kind: 'chat', projectId: project.id, groupId: view.groupId, inGroup: true })} title="Novo chat neste grupo">
             <span class="glyph" aria-hidden="true">+</span>
             <span class="chat-name">Novo chat neste grupo</span>
           </button>
