@@ -83,7 +83,8 @@
   /** "✳ Migrar config para TOML" → "Migrar config para TOML"; o título padrão ("Claude Code") não conta. */
   function sessionTitle(raw: string): string {
     const title = raw.replace(/^[^\p{L}\p{N}]+/u, '').trim().slice(0, TITLE_MAX)
-    return /^claude( code)?$/i.test(title) ? '' : title
+    // Nome genérico do agente ou caminho do executável (título padrão do cmd/PowerShell) não viram nome.
+    return /^claude( code)?$/i.test(title) || /[\\/]|\.exe$/i.test(title) ? '' : title
   }
 
   function clipboardKeys(t: Terminal) {
@@ -305,15 +306,14 @@
         start()
       }
     })
-    // O Claude Code publica o título da sessão no terminal (com um glifo de status na frente).
-    if (profile?.hooks === 'claude') {
-      t.onTitleChange((title) => {
-        if (shellOnlyRunning) return
-        const name = sessionTitle(title)
-        const current = chatById(chat.id)
-        if (name && current && !current.namedByUser && current.name !== name) updateChat(chat.id, { name })
-      })
-    }
+    // O Claude Code publica o título da sessão no terminal (com um glifo de status na frente);
+    // num Terminal, quem roda dentro dele (claude, codex…) também publica, como no cmd/Windows Terminal.
+    t.onTitleChange((title) => {
+      if (shellOnlyRunning) return
+      const name = sessionTitle(title)
+      const current = chatById(chat.id)
+      if (name && current && !current.namedByUser && current.name !== name) updateChat(chat.id, { name })
+    })
     t.onResize(({ cols, rows }) => id !== undefined && invoke('pty_resize', { id, cols, rows }))
 
     terminals.set(chat.id, {

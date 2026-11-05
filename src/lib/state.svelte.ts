@@ -150,7 +150,7 @@ const DEFAULT_PROFILES: Profile[] = [
   AGY_PROFILE,
   { id: 'grok', name: 'Grok', command: 'grok' },
   { id: 'opencode', name: 'OpenCode', command: 'opencode' },
-  { id: 'shell', name: 'Shell', command: '' },
+  { id: 'shell', name: 'Terminal', command: '' },
 ]
 
 const LEGACY_FONT = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
@@ -258,7 +258,10 @@ export async function load(): Promise<boolean> {
     const profiles = config?.profiles ?? DEFAULT_PROFILES
     // v0.1.0 salvou o perfil "gemini"; o comando certo é o agy.
     const legacyGemini = profiles.some((p) => p.id === 'gemini' && p.command === 'gemini')
-    app.profiles = profiles.map((p) => (legacyGemini && p.id === 'gemini' ? AGY_PROFILE : p))
+    app.profiles = profiles
+      .map((p) => (legacyGemini && p.id === 'gemini' ? AGY_PROFILE : p))
+      // O perfil de shell padrão virou "Terminal"; nomes trocados pelo usuário ficam.
+      .map((p) => (p.id === 'shell' && p.name === 'Shell' ? { ...p, name: 'Terminal' } : p))
     app.settings = migrateSettings({
       ...DEFAULT_SETTINGS,
       ...config?.settings,
