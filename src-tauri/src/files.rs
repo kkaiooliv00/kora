@@ -158,14 +158,21 @@ pub fn open_url(url: String, browser: Option<String>) -> Result<(), String> {
     open_default(&url).map_err(|e| format!("não foi possível abrir o link: {e}"))
 }
 
-/// Grava a imagem colada (bytes crus do IPC) num arquivo temporário e devolve o caminho,
+/// Bytes crus pelo protocolo `ipc://`; quando ele falha (comum no Windows) o Tauri cai no
+/// `postMessage`, que serializa o `Uint8Array` como array JSON de números.
+fn body_bytes(body: &InvokeBody) -> Option<Vec<u8>> {
+    match body {
+        InvokeBody::Raw(bytes) => Some(bytes.clone()),
+        InvokeBody::Json(value) => serde_json::from_value(value.clone()).ok(),
+    }
+}
+
+/// Grava a imagem colada num arquivo temporário e devolve o caminho,
 /// que é colado no terminal para o agente ler.
 // ponytail: os prints acumulam no temp do sistema; limpar na inicialização se crescer.
 #[tauri::command]
 pub fn save_image(request: Request<'_>) -> Result<String, String> {
-    let InvokeBody::Raw(bytes) = request.body() else {
-        return Err("esperava os bytes da imagem".into());
-    };
+    let bytes = body_bytes(request.body()).ok_or("esperava os bytes da imagem")?;
     let ext = if bytes.starts_with(PNG_MAGIC) {
         "png"
     } else if bytes.starts_with(JPEG_MAGIC) {
@@ -230,8 +237,17 @@ pub fn open_in_editor(program: String, args: Vec<String>, path: String) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{cmd_quote, valid_permissions};
+    use super::{body_bytes, cmd_quote, valid_permissions};
     use serde_json::json;
+    use tauri::ipc::InvokeBody;
+
+    #[test]
+    fn body_bytes_accepts_raw_and_json_array() {
+        assert_eq!(body_bytes(&InvokeBody::Raw(vec![0x89, 0x50])), Some(vec![0x89, 0x50]));
+        assert_eq!(body_bytes(&InvokeBody::Json(json!([137, 80, 78, 71]))), Some(vec![137, 80, 78, 71]));
+        assert_eq!(body_bytes(&InvokeBody::Json(json!({ "a": 1 }))), None);
+        assert_eq!(body_bytes(&InvokeBody::Json(json!([300]))), None);
+    }
 
     #[test]
     fn valid_permissions_accepts_only_rule_lists() {
