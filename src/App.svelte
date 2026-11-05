@@ -81,7 +81,7 @@
   import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS, openPalette } from './lib/commands'
   import { menuState } from './lib/menu.svelte'
-  import { themeOf } from './lib/themes'
+  import { applyUiTheme, themeOf } from './lib/themes'
   import { watchStats } from './lib/stats.svelte'
   import { checkBudget, watchBudget } from './lib/budget'
   import { SIDEBAR, clampSidebar, dragDivider, paneSizes } from './lib/resize'
@@ -169,6 +169,8 @@
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => save(config, state), SAVE_DELAY_MS)
   })
+
+  $effect(() => applyUiTheme(app.settings.theme))
 
   const waitingNames = $derived(
     Object.entries(app.status)
@@ -822,7 +824,7 @@
     padding-bottom: var(--space-8);
     border: 2px dashed var(--accent);
     border-radius: var(--radius-lg);
-    background: rgb(60 200 212 / 0.06);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
     pointer-events: none;
     z-index: 5;
   }
