@@ -31,6 +31,8 @@
   let changes = $state<Changed[]>([])
   let error = $state('')
   let now = $state(Date.now())
+  /** Lista de alterados aberta; fica como o usuário deixou mesmo quando a lista some e volta. */
+  let showChanges = $state(true)
 
   const byPath = $derived(new Map(changes.map((c) => [c.path, c])))
   const recent = (c: Changed) => c.mtime !== null && now - c.mtime < RECENT_MS
@@ -171,8 +173,8 @@
     </header>
 
     {#if changes.length}
-      <section>
-        <p class="overline">alterados · {changes.length}</p>
+      <details class="changed-list" bind:open={showChanges}>
+        <summary class="overline">alterados · {changes.length}</summary>
         <ul class="changes">
           {#each sorted as c (c.path)}
             <li>
@@ -184,7 +186,7 @@
             </li>
           {/each}
         </ul>
-      </section>
+      </details>
     {/if}
 
     <section class="tree">
@@ -340,6 +342,9 @@
   .link:disabled {
     color: var(--ink-faint);
     text-decoration: none;
+  }
+  .changed-list .changes {
+    margin-top: var(--space-1);
   }
   details summary {
     cursor: pointer;
