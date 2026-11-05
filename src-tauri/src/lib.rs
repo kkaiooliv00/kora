@@ -1,5 +1,6 @@
 mod api;
 mod checkpoint;
+mod explorer;
 mod files;
 mod git;
 mod history;
@@ -32,6 +33,9 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
+            explorer::list_dir,
+            explorer::read_file,
+            explorer::changed_files,
             files::load_json,
             files::save_json,
             files::claude_settings,

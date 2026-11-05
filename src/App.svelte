@@ -29,7 +29,8 @@
   import Kbd from './Kbd.svelte'
   import ToastStack from './ToastStack.svelte'
   import Menu from './Menu.svelte'
-  import AgentPanel from './AgentPanel.svelte'
+  import FilesPanel from './FilesPanel.svelte'
+  import FileViewer from './FileViewer.svelte'
   import ApprovalBar from './ApprovalBar.svelte'
   import Composer from './Composer.svelte'
   import LoopCard from './LoopCard.svelte'
@@ -436,8 +437,8 @@
       <button
         class="icon-btn"
         class:on={app.showPanel}
-        title="Painel do agente ({normalizeCombo(app.settings.keys.panel ?? '')})"
-        aria-label="Mostrar painel do agente"
+        title="Painel de arquivos ({normalizeCombo(app.settings.keys.panel ?? '')})"
+        aria-label="Mostrar painel de arquivos"
         aria-pressed={app.showPanel}
         onclick={() => (app.showPanel = !app.showPanel)}
       >
@@ -574,7 +575,7 @@
       {/if}
       {#if !hasTab}<Welcome />{/if}
     </main>
-    {#if showPanel}<AgentPanel />{/if}
+    {#if showPanel}<FilesPanel />{/if}
   </div>
 
   <footer class="statusbar">
@@ -589,7 +590,7 @@
     {#if hasTab && activeChat && isClaudeChat}
       <button class="stat model" title="Trocar o modelo (/model no Claude)" onclick={switchModel}>[{model ?? activeProfile?.name.toLowerCase()}] ▾</button>
       {#if memory !== undefined}
-        <button class="stat" title="Memória da conversa: quanto da janela de contexto já foi usado" onclick={() => (app.showPanel = true)}>memória {memory}%</button>
+        <button class="stat" title="Memória da conversa: quanto da janela de contexto já foi usado. Clique para compactar (/compact)." disabled={activeStatus === 'running'} onclick={() => app.active && terminals.get(app.active)?.submit('/compact')}>memória {memory}%</button>
       {/if}
     {:else if hasTab && activeProfile}
       <span>[{activeProfile.name.toLowerCase()}]</span>
@@ -618,6 +619,7 @@
   {#if app.modal === 'history'}<History />{/if}
   {#if app.modal === 'template'}<Template />{/if}
   {#if app.modal === 'shortcuts'}<Shortcuts />{/if}
+  {#if app.modal === 'file' && app.viewFile}{#key app.viewFile}<FileViewer file={app.viewFile} />{/key}{/if}
   {#if app.tourStep !== null}<Tour />{/if}
   <Tooltip />
 
