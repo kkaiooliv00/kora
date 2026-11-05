@@ -3,7 +3,7 @@
   import X from '@lucide/svelte/icons/x'
   import { app, type Profile, type Snippet } from './lib/state.svelte'
   import { ACTIONS } from './lib/commands'
-  import { THEMES, themeOf } from './lib/themes'
+  import { THEMES, changesUi, themeOf } from './lib/themes'
   import { checkBudget } from './lib/budget'
   import { CATEGORIES, DEFAULT_PERMISSIONS, type Permissions, type Policy } from './lib/permissions'
 
@@ -271,13 +271,13 @@
         </div>
       {:else if section === 'terminal'}
         <h2>terminal e aparência</h2>
-        <p class="lead">A interface segue a identidade Kora; aqui muda só o terminal.</p>
+        <p class="lead">Temas marcados com ◐ mudam a interface inteira; os outros mudam só o terminal.</p>
         <div class="grid">
           <label class="field">
             Tema do terminal
             <select bind:value={draft.theme}>
               {#each Object.keys(THEMES) as name (name)}
-                <option value={name}>{name}</option>
+                <option value={name}>{changesUi(name) ? `◐ ${name}` : name}</option>
               {/each}
             </select>
             <span class="swatches" style:background={preview.background} style:color={preview.foreground} aria-hidden="true">

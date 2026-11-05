@@ -36,9 +36,16 @@ function palette(background: string, foreground: string, cursor: string, selecti
   }
 }
 
-/** Temas do terminal. A interface segue sempre a marca Kora; só o terminal muda. */
+/** Temas do terminal. Os que têm entrada em UI_THEMES também mudam a interface; os outros mantêm a marca Kora. */
 export const THEMES: Record<string, ITheme> = {
   Kora: KORA,
+  // Tons quentes (areia, argila, papel): mudam a interface inteira.
+  Areia: palette('#1a1918', '#ebe6df', '#d97757', '#4a3d33',
+    '#2a2826 #e8735a #8fc28a #e0b45c #8fa8c8 #c49ac0 #8cbfb5 #a8a199 #6b645c #f2957e #a9d4a4 #ecc982 #aec2dc #d8b6d4 #a9d3ca #ebe6df'),
+  Argila: palette('#15110f', '#f0e6dc', '#c8643c', '#4d3226',
+    '#251f1b #e06a4a #8cbf7f #d9a94f #8aa0bf #c08fb4 #86b8a8 #b3a291 #75655a #ef8e72 #a8d39c #e6c27a #a9bcd6 #d4adca #a4cfc1 #f0e6dc'),
+  Papel: palette('#faf8f4', '#2b2724', '#b85a35', '#e6d3c4',
+    '#2b2724 #c0392b #2f7d3a #8f6400 #2f5f9a #8a3f8a #1f7a74 #d6cfc3 #7a7269 #d0503f #3d8f48 #a87700 #3d72b0 #a052a0 #2a8f88 #e9e4db'),
   // Fundo bg-100 (o da barra lateral): o terminal some na interface. ANSI puxado para azul/ciano.
   'Kora Azul': palette('#0f1519', '#e2eaed', '#3cc8d4', '#0e4f5a',
     '#1c262c #ff8a6b #7fd69b #e8b852 #5aa9e6 #a99cf0 #3cc8d4 #93a3ab #5a6d77 #ffb29c #a6e7b9 #f2d08a #8cc4f0 #c8bff7 #7fe0e8 #e2eaed'),
@@ -120,3 +127,61 @@ export const THEMES: Record<string, ITheme> = {
 }
 
 export const themeOf = (name: string): ITheme => THEMES[name] ?? KORA
+
+type UiTheme = { scheme: 'dark' | 'light'; tokens: Record<string, string> }
+
+/** Sobrescreve os tokens de src/styles/tokens.css. */
+const UI_THEMES: Record<string, UiTheme> = {
+  Areia: {
+    scheme: 'dark',
+    tokens: {
+      'bg-000': '#1a1918', 'bg-100': '#201f1d', 'bg-200': '#2a2826', 'bg-300': '#34312e',
+      line: '#3a3632', 'line-control': '#6b645c',
+      ink: '#ebe6df', 'ink-muted': '#a8a199', 'ink-faint': '#857e76',
+      accent: '#d97757', 'accent-strong': '#ec9a7c', 'accent-soft': '#3a241b', 'on-accent': '#1d0f09', petrol: '#4a3d33',
+      success: '#8fc28a', 'success-soft': '#1d2a1c', warning: '#e0b45c', 'warning-soft': '#2f2614',
+      danger: '#e8735a', 'danger-soft': '#331a14',
+      'shadow-pop': '0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px #3a3632',
+    },
+  },
+  Argila: {
+    scheme: 'dark',
+    tokens: {
+      'bg-000': '#15110f', 'bg-100': '#1c1714', 'bg-200': '#251f1b', 'bg-300': '#2f2722',
+      line: '#3d332c', 'line-control': '#75655a',
+      ink: '#f0e6dc', 'ink-muted': '#b3a291', 'ink-faint': '#8c7c6e',
+      accent: '#c8643c', 'accent-strong': '#e08a63', 'accent-soft': '#36201a', 'on-accent': '#1a0b05', petrol: '#4d3226',
+      success: '#8cbf7f', 'success-soft': '#1b271a', warning: '#d9a94f', 'warning-soft': '#2d2312',
+      danger: '#e06a4a', 'danger-soft': '#321812',
+      'shadow-pop': '0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px #3d332c',
+    },
+  },
+  Papel: {
+    scheme: 'light',
+    tokens: {
+      'bg-000': '#faf8f4', 'bg-100': '#f2eee7', 'bg-200': '#e9e4db', 'bg-300': '#ddd6ca',
+      line: '#d6cfc3', 'line-control': '#9c9285',
+      ink: '#2b2724', 'ink-muted': '#5f5851', 'ink-faint': '#7a7269',
+      accent: '#b85a35', 'accent-strong': '#9a4526', 'accent-soft': '#f3e1d6', 'on-accent': '#ffffff', petrol: '#e6d3c4',
+      success: '#2f7d3a', 'success-soft': '#e2efdf', warning: '#8f6400', 'warning-soft': '#f5ead0',
+      danger: '#c0392b', 'danger-soft': '#f7dfda',
+      'shadow-pop': '0 12px 32px rgba(60, 40, 20, 0.15), 0 0 0 1px #d6cfc3',
+    },
+  },
+}
+
+const UI_TOKENS = [...new Set(Object.values(UI_THEMES).flatMap((t) => Object.keys(t.tokens)))]
+
+/** Aplica (ou desfaz, para temas só de terminal) as cores da interface do tema. */
+export function applyUiTheme(name: string) {
+  const root = document.documentElement.style
+  const ui = UI_THEMES[name]
+  for (const token of UI_TOKENS) {
+    const value = ui?.tokens[token]
+    if (value) root.setProperty(`--${token}`, value)
+    else root.removeProperty(`--${token}`)
+  }
+  root.colorScheme = ui?.scheme ?? ''
+}
+
+export const changesUi = (name: string) => name in UI_THEMES
