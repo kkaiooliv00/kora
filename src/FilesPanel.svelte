@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { ask } from '@tauri-apps/plugin-dialog'
   import { app, chatById, chatDir, fail } from './lib/state.svelte'
@@ -42,9 +43,13 @@
   const join = (sub: string, name: string) => (sub ? `${sub}/${name}` : name)
 
   async function load(sub: string) {
-    if (!root) return
+    const dir = root
+    if (!dir) return
     try {
-      children[sub] = await invoke<Entry[]>('list_dir', { root, sub })
+      const list = await invoke<Entry[]>('list_dir', { root: dir, sub })
+      // Trocou de chat/projeto no meio: a resposta é da pasta antiga.
+      if (dir !== root) return
+      children[sub] = list
       error = ''
     } catch (e) {
       if (!sub) error = String(e)
@@ -64,13 +69,17 @@
   }
 
   // Troca de pasta (outro chat/projeto): zera a árvore e recomeça.
+  // untrack: o efeito zera e relê `children`/`changes`; sem ele passa a depender do que ele mesmo grava
+  // e entra em loop (effect_update_depth_exceeded), travando a janela e a volta dos terminais.
   $effect(() => {
     void root
-    children = {}
-    expanded = {}
-    changes = []
-    load('')
-    poll()
+    untrack(() => {
+      children = {}
+      expanded = {}
+      changes = []
+      load('')
+      poll()
+    })
     const timer = setInterval(poll, POLL_MS)
     return () => clearInterval(timer)
   })
