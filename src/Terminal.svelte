@@ -389,10 +389,22 @@
 
   $effect(() => {
     if (!term) return
-    term.options.fontFamily = app.settings.fontFamily
-    term.options.fontSize = app.settings.fontSize
-    term.options.theme = themeOf(app.settings.theme)
+    const t = term
+    const { fontFamily, fontSize } = app.settings
+    t.options.fontFamily = fontFamily
+    t.options.fontSize = fontSize
+    t.options.theme = themeOf(app.settings.theme)
     if (el.offsetParent) fit.fit()
+    // Fonte embutida só baixa quando usada: o xterm mediu com a de reserva, então mede de novo depois.
+    const font = `${fontSize}px ${fontFamily}`
+    if (!document.fonts.check(font)) {
+      document.fonts.load(font).then(() => {
+        if (term !== t || t.options.fontFamily !== fontFamily) return
+        t.options.fontFamily = 'monospace'
+        t.options.fontFamily = fontFamily
+        if (el.offsetParent) fit.fit()
+      }).catch(() => {})
+    }
   })
 
   $effect(() => {

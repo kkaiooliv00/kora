@@ -3,6 +3,7 @@
   import X from '@lucide/svelte/icons/x'
   import { app, type Profile, type Snippet } from './lib/state.svelte'
   import { ACTIONS } from './lib/commands'
+  import { FONTS, fontOf, fontStack } from './lib/fonts'
   import { THEMES, changesUi, themeOf } from './lib/themes'
   import { checkBudget } from './lib/budget'
   import { CATEGORIES, DEFAULT_PERMISSIONS, type Permissions, type Policy } from './lib/permissions'
@@ -30,6 +31,7 @@
   let budget = $state({ ...app.settings.budget })
   let loop = $state({ ...app.settings.loop })
   const preview = $derived(themeOf(draft.theme))
+  let customFont = $state(false)
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
   /** Um campo por ação; vazio = sem atalho. */
@@ -291,8 +293,29 @@
           </label>
           <label class="field wide">
             Fonte
-            <span class="help">Padrão: JetBrains Mono, a fonte da marca.</span>
-            <input bind:value={draft.fontFamily} spellcheck="false" />
+            <span class="help">As mais usadas na web vêm junto com o Kora; as "do sistema" precisam estar instaladas.</span>
+            <select
+              value={customFont ? '' : (fontOf(draft.fontFamily)?.name ?? '')}
+              onchange={(e) => {
+                const name = e.currentTarget.value
+                customFont = !name
+                if (name) draft.fontFamily = fontStack(name)
+              }}
+            >
+              <optgroup label="Web (embutidas)">
+                {#each FONTS.filter((f) => !f.system) as font (font.name)}<option value={font.name}>{font.name}</option>{/each}
+              </optgroup>
+              <optgroup label="Do sistema">
+                {#each FONTS.filter((f) => f.system) as font (font.name)}<option value={font.name}>{font.name}</option>{/each}
+              </optgroup>
+              <option value="">Outra…</option>
+            </select>
+            {#if customFont || !fontOf(draft.fontFamily)}
+              <input bind:value={draft.fontFamily} spellcheck="false" aria-label="Fonte personalizada (CSS font-family)" />
+            {/if}
+            <span class="font-preview" style:font-family={draft.fontFamily} style:font-size="{draft.fontSize}px">
+              claude › const total = itens.reduce((s, i) =&gt; s + i, 0) // 0Oo 1lI
+            </span>
           </label>
         </div>
       {:else if section === 'atalhos'}
@@ -545,5 +568,16 @@
     width: 14px;
     height: 14px;
     border-radius: 3px;
+  }
+  .font-preview {
+    display: block;
+    overflow: hidden;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--bg-000);
+    color: var(--ink);
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 </style>
