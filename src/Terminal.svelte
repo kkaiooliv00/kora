@@ -14,7 +14,8 @@
   import { terminals } from './lib/terminals'
   import { splitCommand } from './lib/command'
   import { claudePermissions } from './lib/permissions'
-  import { themeOf } from './lib/themes'
+  import { terminalTheme } from './lib/themes'
+  import { pendingApproval } from './lib/approval'
 
   // Sem saída por esse tempo = agente parado (para CLIs sem hooks).
   const IDLE_MS = 2500
@@ -25,6 +26,8 @@
   const RESUME_GONE = /No conversation found/i
   const RESUME_WATCH_BYTES = 8192
   const PROMPT_READY_QUIET_MS = 1500
+  // Avisos de foco que o xterm manda quando o programa liga o modo 1004.
+  const FOCUS_REPORT = /^(\x1b\[[IO])+$/
   // Linha 13/20 do token `term` do design.
   const LINE_HEIGHT = 20 / 13
   // Perfis com "reconnect": espera 2, 4, 8… s (até 30) entre tentativas; desiste depois de 6 seguidas.
@@ -129,7 +132,7 @@
     const t = new Terminal({
       fontFamily: app.settings.fontFamily,
       fontSize: app.settings.fontSize,
-      theme: themeOf(app.settings.theme),
+      theme: terminalTheme(app.settings.theme, app.settings.uiTheme),
       cursorBlink: true,
       cursorStyle: 'block',
       lineHeight: LINE_HEIGHT,
@@ -308,6 +311,8 @@
       }
     })
     t.onData((data) => {
+      // Aviso de foco (ESC[I / ESC[O) com pedido de permissão aberto: o Claude lê o ESC como Esc e interrompe.
+      if (FOCUS_REPORT.test(data) && pendingApproval(chat.id)) return
       if (id !== undefined) write(data)
       else if (stopped && data === '\r') {
         t.reset()
@@ -393,7 +398,7 @@
     const { fontFamily, fontSize } = app.settings
     t.options.fontFamily = fontFamily
     t.options.fontSize = fontSize
-    t.options.theme = themeOf(app.settings.theme)
+    t.options.theme = terminalTheme(app.settings.theme, app.settings.uiTheme)
     if (el.offsetParent) fit.fit()
     // Fonte embutida só baixa quando usada: o xterm mediu com a de reserva, então mede de novo depois.
     const font = `${fontSize}px ${fontFamily}`

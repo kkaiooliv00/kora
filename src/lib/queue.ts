@@ -110,3 +110,16 @@ export function broadcast(text: string, ids: string[]): { sent: number; queued: 
 }
 
 export const goTo = (id: string) => focusChat(id)
+
+/** Um prompt para um chat: na hora se estiver livre, na fila se estiver ocupado. */
+export function sendTo(id: string, text: string): 'sent' | 'queued' | 'closed' {
+  const busy = app.status[id] === 'running' || app.status[id] === 'waiting'
+  if (busy) {
+    update(id, { pending: [...queueOf(id).pending, text.trim()] })
+    return 'queued'
+  }
+  const terminal = terminals.get(id)
+  if (!terminal || terminal.pty() === undefined) return 'closed'
+  terminal.submit(text.trim())
+  return 'sent'
+}

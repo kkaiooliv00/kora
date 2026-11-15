@@ -42,9 +42,9 @@ export function groupViews(projectId: string, chats: Chat[], groups: Group[], ma
       chats: members,
     })
   }
-  // O ▶ de rodar projeto usa o worktree do dono: entra no grupo dele em vez de criar outro igual.
-  for (const chat of loose.filter((c) => c.branch && !c.runOf)) {
-    const runs = loose.filter((c) => c.runOf === chat.id)
+  // O ▶ de rodar projeto e o revisor usam o worktree do dono: entram no grupo dele em vez de criar outro igual.
+  for (const chat of loose.filter((c) => c.branch && !c.runOf && !c.reviewOf)) {
+    const runs = loose.filter((c) => c.runOf === chat.id || c.reviewOf === chat.id)
     views.push({ key: `wt:${chat.id}`, name: chat.branch!, branch: chat.branch!, principal: false, worktree: true, chats: [chat, ...runs] })
   }
   return views

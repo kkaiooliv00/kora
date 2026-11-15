@@ -1,3 +1,4 @@
+mod agent_config;
 mod api;
 mod checkpoint;
 mod explorer;
@@ -54,6 +55,7 @@ pub fn run() {
             project::worktree_setup,
             project::free_port,
             tray::set_waiting,
+            tray::show_window,
             stats::pty_stats,
             checkpoint::checkpoints,
             checkpoint::restore_checkpoint,
@@ -61,7 +63,12 @@ pub fn run() {
             history::conversation_markdown,
             history::save_text,
             usage::usage_summary,
-            limits::codex_limits
+            limits::codex_limits,
+            agent_config::project_mcp,
+            agent_config::save_project_mcp,
+            agent_config::project_skills,
+            agent_config::save_skill,
+            agent_config::remove_skill
         ])
         .build(tauri::generate_context!())
         .expect("falha ao iniciar o Kora")

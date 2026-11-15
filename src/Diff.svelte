@@ -1,9 +1,11 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core'
-  import { app, chatById, chatDir, fail, projectOf, removeChat } from './lib/state.svelte'
+  import { app, chatById, chatDir, fail, guestOf, profileOf, projectOf, removeChat } from './lib/state.svelte'
   import { toast } from './lib/toasts.svelte'
   import { ask } from '@tauri-apps/plugin-dialog'
-  import { parseDiff, type DiffFile } from './lib/diff'
+  import { parseDiff, type DiffFile, type DiffLine } from './lib/diff'
+  import { sendTo } from './lib/queue'
+  import { startReview } from './lib/work'
   import EmptyState from './EmptyState.svelte'
   import Skeleton from './Skeleton.svelte'
 
@@ -23,7 +25,56 @@
 
   // Fluxo do worktree: commit aqui, depois mesclar na branch do projeto ou abrir PR.
   const project = chat ? projectOf(chat) : undefined
-  const worktreeBranch = chat?.runOf ? undefined : chat?.branch
+  const worktreeBranch = chat && guestOf(chat) ? undefined : chat?.branch
+
+  // Comentários de revisão por linha: viram um prompt para o agente do chat corrigir.
+  type Comment = { key: string; path: string; line: number; removed: boolean; code: string; text: string }
+  let comments = $state<Comment[]>([])
+  let editing = $state<string | null>(null)
+  let draftComment = $state('')
+  const isAgent = !!chat && !!profileOf(chat)?.command.trim()
+  const keyOf = (path: string, i: number) => `${path}#${i}`
+
+  function startComment(path: string, i: number) {
+    const key = keyOf(path, i)
+    editing = editing === key ? null : key
+    draftComment = comments.find((c) => c.key === key)?.text ?? ''
+  }
+
+  function saveComment(path: string, i: number, line: DiffLine) {
+    const key = keyOf(path, i)
+    const text = draftComment.trim()
+    const rest = comments.filter((c) => c.key !== key)
+    comments = text ? [...rest, { key, path, line: (line.kind === 'del' ? line.oldNo : line.newNo) ?? 0, removed: line.kind === 'del', code: line.text.trim(), text }] : rest
+    editing = null
+  }
+
+  const onCommentKey = (e: KeyboardEvent, path: string, i: number, line: DiffLine) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      saveComment(path, i, line)
+    } else if (e.key === 'Escape') {
+      e.stopPropagation()
+      editing = null
+    }
+  }
+
+  function sendComments() {
+    if (!chat || comments.length === 0) return
+    const items = comments.map((c, n) => `${n + 1}. ${c.path}:${c.line}${c.removed ? ' (linha removida; número de antes)' : ''}${c.code ? ` (\`${c.code.slice(0, 80)}\`)` : ''}\n   ${c.text.replace(/\n/g, '\n   ')}`)
+    const prompt = `Revisei as suas mudanças e deixei comentários em linhas do diff. Corrija cada ponto:\n\n${items.join('\n')}`
+    const result = sendTo(chat.id, prompt)
+    if (result === 'closed') return toast({ tone: 'warning', title: 'Chat fechado', text: 'Abra o chat do agente para enviar os comentários.' })
+    toast({ tone: 'success', title: result === 'sent' ? 'Comentários enviados ao agente' : 'Comentários na fila do agente', text: `${comments.length} ${comments.length === 1 ? 'comentário' : 'comentários'}` })
+    comments = []
+    app.modal = null
+  }
+
+  function review() {
+    if (!chat) return
+    app.modal = null
+    startReview(chat.id)
+  }
   let message = $state('')
   let busy = $state('')
   let mainBranch = $state<string | null>(null)
@@ -120,6 +171,9 @@
         <h2>mudanças</h2>
         <p class="sub">{chat?.name ?? 'projeto'} · {branchLine || dir || 'nenhum projeto'}</p>
       </div>
+      {#if isAgent && hasChanges}
+        <button class="btn" onclick={review} title="Abre ao lado outro agente que revisa estas mudanças sem editar nada">Pedir revisão</button>
+      {/if}
       <button class="btn" onclick={refresh} disabled={loading}>{loading ? 'Carregando…' : 'Atualizar'}</button>
       <button class="btn ghost" onclick={() => (app.modal = null)}>Fechar</button>
     </header>
@@ -190,11 +244,44 @@
                 {#if line.kind === 'hunk'}
                   <div class="hunk">⋯ {line.text}</div>
                 {:else}
-                  <div class="line {line.kind}">
-                    <span class="no">{line.kind === 'del' ? line.oldNo : line.newNo}</span>
+                  {@const key = keyOf(file.path, i)}
+                  {@const saved = comments.find((c) => c.key === key)}
+                  <div class="line {line.kind}" class:commented={!!saved}>
+                    {#if isAgent}
+                      <button class="no comment-btn" onclick={() => startComment(file.path, i)} title="Comentar esta linha" aria-label="Comentar a linha {line.kind === 'del' ? line.oldNo : line.newNo}">
+                        <span class="plus" aria-hidden="true">+</span>{line.kind === 'del' ? line.oldNo : line.newNo}
+                      </button>
+                    {:else}
+                      <span class="no">{line.kind === 'del' ? line.oldNo : line.newNo}</span>
+                    {/if}
                     <span class="mark">{line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ''}</span>
                     <span class="code">{line.text}</span>
                   </div>
+                  {#if editing === key}
+                    <div class="comment-box" data-own-escape>
+                      <!-- svelte-ignore a11y_autofocus -->
+                      <textarea
+                        class="input"
+                        rows="2"
+                        bind:value={draftComment}
+                        placeholder="O que o agente deve mudar aqui? (Ctrl+Enter salva)"
+                        aria-label="Comentário"
+                        autofocus
+                        onkeydown={(e) => onCommentKey(e, file.path, i, line)}
+                      ></textarea>
+                      <div class="comment-actions">
+                        <button class="btn ghost sm" onclick={() => (editing = null)}>Cancelar</button>
+                        <button class="btn primary sm" onclick={() => saveComment(file.path, i, line)}>{draftComment.trim() || !saved ? 'Salvar' : 'Remover'}</button>
+                      </div>
+                    </div>
+                  {:else if saved}
+                    <div class="comment-note">
+                      <span class="who" aria-hidden="true">↳</span>
+                      <span class="text">{saved.text}</span>
+                      <button class="link" onclick={() => startComment(file.path, i)}>Editar</button>
+                      <button class="link" onclick={() => (comments = comments.filter((c) => c.key !== key))}>Remover</button>
+                    </div>
+                  {/if}
                 {/if}
               {/each}
               {#if file.lines.length > MAX_LINES_PER_FILE}
@@ -212,6 +299,20 @@
         </ul>
       {/if}
     </div>
+
+    {#if isAgent && files.length > 0}
+      <footer class="review-bar">
+        <span class="hint-text">
+          {comments.length === 0
+            ? 'Clique no número de uma linha para comentar; os comentários vão juntos para o agente corrigir.'
+            : `${comments.length} ${comments.length === 1 ? 'comentário' : 'comentários'} para ${chat?.name}`}
+        </span>
+        {#if comments.length > 0}
+          <button class="btn ghost sm" onclick={() => (comments = [])}>Descartar</button>
+          <button class="btn primary sm" onclick={sendComments}>Enviar ao agente</button>
+        {/if}
+      </footer>
+    {/if}
   </div>
 </div>
 
@@ -333,6 +434,66 @@
   }
   .skeleton {
     padding: var(--space-4);
+  }
+  .comment-btn {
+    font: inherit;
+    cursor: pointer;
+  }
+  .comment-btn .plus {
+    margin-right: var(--space-1);
+    color: var(--accent);
+    visibility: hidden;
+  }
+  .line:hover .comment-btn .plus,
+  .comment-btn:focus-visible .plus {
+    visibility: visible;
+  }
+  .line.commented {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .comment-box,
+  .comment-note {
+    margin: var(--space-1) var(--space-4) var(--space-2) 76px;
+    font: 13px/18px var(--font-sans);
+    white-space: normal;
+  }
+  .comment-box textarea {
+    width: 100%;
+    resize: vertical;
+  }
+  .comment-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+  }
+  .comment-note {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+  }
+  .comment-note .who {
+    color: var(--accent);
+  }
+  .comment-note .text {
+    flex: 1;
+    white-space: pre-wrap;
+  }
+  .review-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+  }
+  .hint-text {
+    flex: 1;
+    font-size: 12px;
+    color: var(--ink-muted);
   }
   .untracked {
     margin: var(--space-2) 0 0;

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
+import { isPermissionGranted, onAction, registerActionTypes, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
+import { actionOf, answer, pendingApproval } from './approval'
 import {
   app,
   chatById,
@@ -19,7 +20,7 @@ import {
 import { terminals } from './terminals'
 import { splitCommand } from './command'
 import { onQueueStatus } from './queue'
-import { onTaskStatus } from './work'
+import { onReviewStatus, onTaskStatus } from './work'
 import { toast } from './toasts.svelte'
 
 export function setStatus(id: string, status: Status) {
@@ -30,6 +31,7 @@ export function setStatus(id: string, status: Status) {
   else delete app.waitingSince[id]
   onQueueStatus(id, previous, status)
   onTaskStatus(id, previous, status)
+  onReviewStatus(id, previous, status)
 }
 
 export { broadcast, enqueue, dequeue } from './queue'
@@ -77,13 +79,41 @@ export function openActiveInEditor() {
   openInEditor(chat ? chatDir(chat) : app.projects[0]?.path)
 }
 
-export async function notify(title: string, body: string) {
+/** Botões da notificação de pedido de permissão. */
+const APPROVAL_ACTIONS = 'approval'
+
+/**
+ * Notificação do sistema. Com `chat`, clicar nela abre o chat; com `approval`, ela ganha
+ * "Aprovar" e "Recusar", que respondem ao agente sem abrir a janela.
+ */
+export async function notify(title: string, body: string, chat?: string, approval = false) {
   try {
     const granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
-    if (granted) sendNotification({ title, body })
+    if (granted) sendNotification({ title, body, extra: chat ? { chat } : undefined, actionTypeId: approval ? APPROVAL_ACTIONS : undefined })
   } catch (e) {
     fail('Falha ao notificar', e)
   }
+}
+
+/** Liga os botões das notificações. No Windows só valem enquanto o aviso está na tela (não na Central de Ações). */
+export async function watchNotifications(): Promise<() => void> {
+  await registerActionTypes([
+    { id: APPROVAL_ACTIONS, actions: [{ id: 'once', title: 'Aprovar' }, { id: 'refuse', title: 'Recusar' }] },
+  ])
+  const listener = await onAction(({ actionId, notification }) => {
+    const chat = notification?.extra?.chat
+    if (typeof chat !== 'string' || !chatById(chat)) return
+    if ((actionId === 'once' || actionId === 'refuse') && pendingApproval(chat)) return answer(chat, actionId)
+    invoke('show_window').catch(() => {})
+    openChat(chat)
+  })
+  return () => listener.unregister()
+}
+
+/** Corpo da notificação de um pedido de permissão: o que o agente quer fazer. */
+const approvalText = (id: string) => {
+  const action = actionOf(app.agentInfo[id]?.pending)
+  return action ? `Pede permissão: ${action}` : 'Pede permissão para continuar'
 }
 
 /** Status vindo dos hooks do Claude Code; notifica se o chat não está à vista. */
@@ -106,15 +136,20 @@ export function onHookStatus(id: string, status: Status, session: string | null,
   if (detail?.event === 'PreToolUse') watchLoop(chat, detail)
   const finished = status === 'idle' && (previous === 'running' || previous === 'waiting')
   // Janela fora de foco: notificação do sistema. Janela em foco, chat em outra aba: toast.
+  const asking = status === 'waiting' && pendingApproval(id)
   if (!document.hasFocus()) {
-    if (status === 'waiting') notify(chat.name, 'Aguardando sua interação')
-    else if (finished) notify(chat.name, 'Terminou')
+    if (asking) notify(chat.name, approvalText(id), id, true)
+    else if (status === 'waiting') notify(chat.name, 'Aguardando sua interação', id)
+    else if (finished) notify(chat.name, 'Terminou', id)
   } else if (!isVisible(id) && status === 'waiting') {
     toast({
       tone: 'warning',
       title: `${chat.name} aguarda você`,
-      text: detail?.message ?? 'O agente parou esperando uma resposta sua.',
-      actions: [{ label: 'Ir para o chat', primary: true, run: () => openChat(id) }],
+      text: asking ? approvalText(id) : (detail?.message ?? 'O agente parou esperando uma resposta sua.'),
+      actions: [
+        ...(asking ? [{ label: 'Aprovar', run: () => answer(id, 'once') }] : []),
+        { label: 'Ir para o chat', primary: true, run: () => openChat(id) },
+      ],
     })
   }
 }

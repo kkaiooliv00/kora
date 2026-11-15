@@ -18,6 +18,7 @@ import { activeSnippets, openActiveInEditor, openInEditor, pasteSnippet, resumeA
 import { terminals } from './terminals'
 import { toast } from './toasts.svelte'
 import { answer } from './approval'
+import { startReview } from './work'
 
 /** Grupos da paleta, na ordem em que aparecem (tela 03 do design). */
 export const GROUPS = ['ações', 'sessões', 'novo chat', 'snippets', 'projetos'] as const
@@ -71,6 +72,7 @@ export const ACTIONS: Record<string, { label: string; run: () => void }> = {
   queue: { label: 'Fila de prompts do chat em foco', run: () => app.active && (app.modal = 'queue') },
   editor: { label: 'Abrir projeto no editor', run: openActiveInEditor },
   diff: { label: 'Ver mudanças do chat em foco', run: () => (app.modal = 'diff') },
+  review: { label: 'Pedir revisão das mudanças a outro agente', run: () => app.active && startReview(app.active) },
   usage: { label: 'Uso de tokens', run: () => (app.modal = 'usage') },
   panel: { label: 'Mostrar ou esconder o painel de arquivos', run: () => (app.showPanel = !app.showPanel) },
   settings: { label: 'Configurações', run: () => (app.modal = 'settings') },

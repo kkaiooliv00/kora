@@ -26,6 +26,7 @@
     type Project,
   } from './lib/state.svelte'
   import { openInEditor } from './lib/automation'
+  import { sendReview, startReview } from './lib/work'
   import { normalizeCombo } from './lib/keys'
   import { exportChat } from './lib/export'
   import Archive from '@lucide/svelte/icons/archive'
@@ -160,6 +161,8 @@
         },
       },
       { label: 'Rodar projeto ao lado', disabled: !!chat.runOf, run: () => runProject(chat.id) },
+      { label: 'Pedir revisão a outro agente', disabled: !!chat.runOf || !!chat.reviewOf, run: () => startReview(chat.id) },
+      ...(chat.reviewOf ? [{ label: 'Enviar revisão ao agente original', run: () => sendReview(chat.id) }] : []),
       { separator: true },
       {
         label: 'Mover para grupo',

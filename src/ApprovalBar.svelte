@@ -27,7 +27,8 @@
 </script>
 
 {#if visible}
-  <div class="approval" class:compact role="alertdialog" aria-label="Pedido de aprovação do agente" data-tour="approval">
+  <!-- Clicar aqui não tira o foco do terminal: perder o foco manda ESC[O ao agente, que interrompe o pedido. -->
+  <div class="approval" class:compact role="alertdialog" tabindex="-1" aria-label="Pedido de aprovação do agente" data-tour="approval" onmousedown={(e) => e.preventDefault()}>
     <header>
       <span class="prompt" aria-hidden="true">›</span>
       <code class="action" title={action}>{action}</code>

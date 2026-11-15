@@ -36,7 +36,7 @@ function palette(background: string, foreground: string, cursor: string, selecti
   }
 }
 
-/** Temas do terminal. Os que têm entrada em UI_THEMES também mudam a interface; os outros mantêm a marca Kora. */
+/** Temas do terminal. Os que têm entrada em UI_THEMES também existem como tema da interface. */
 export const THEMES: Record<string, ITheme> = {
   Kora: KORA,
   // Tons quentes (areia, argila, papel): mudam a interface inteira.
@@ -163,11 +163,30 @@ export const THEMES: Record<string, ITheme> = {
     '#000000 #de3e35 #3f953a #d2b67c #2f5af3 #950095 #3f953a #bbbbbb #000000 #de3e35 #3f953a #d2b67c #2f5af3 #a00095 #3f953a #ffffff'),
   Synthwave: palette('#262335', '#dad9c7', '#19cde6', '#463465',
     '#000000 #f6188f #1ebb2b #fdf834 #2186ec #f85a21 #12c3e2 #ffffff #7f7094 #f841a0 #25c141 #fdf454 #2f9ded #f97137 #19cde6 #ffffff'),
+  // Temas da casa (mudam a interface inteira): musgo, azul-noite e névoa (claro frio).
+  Musgo: palette('#0f1410', '#e3eadf', '#9cc069', '#2f4325',
+    '#1b231c #e8806a #86c98a #e3b55a #7fa7c9 #c39ad0 #7cc4b4 #a3b09e #5f6f5f #f2a08c #a7dcaa #ecca85 #a3c3dd #d7b8e0 #a1d9cc #e3eadf'),
+  Noite: palette('#0b0f1c', '#e1e6f5', '#8b9cff', '#2a3570',
+    '#161d36 #ff8a8a #7fd6a6 #f0c068 #8b9cff #c79bf2 #6fd3e8 #9aa4c7 #56628e #ffb0b0 #a7e7c4 #f6d692 #b4c0ff #dcbff8 #9ee4f1 #e1e6f5'),
+  Névoa: palette('#f5f7fa', '#1f2933', '#1a7f8e', '#c9e4e8',
+    '#1f2933 #c2413a #2e7d4f #8a6100 #2f62a8 #8b45a6 #1a7f8e #d6dde7 #66727f #d4544c #3a9461 #a37600 #3d74bf #a05abb #24939f #e9edf2'),
+  // Alvor Labs (manual da marca): grafite #1D1D1F, névoa #F5F5F7, prata #6E6E73 e o âmbar do cursor #FFB02E.
+  Alvor: palette('#1d1d1f', '#f5f5f7', '#ffb02e', '#4a3c22',
+    '#2c2c2e #ff7a45 #5fd38a #ffb02e #64a8ff #c89bf0 #5ccfe6 #a1a1a6 #6e6e73 #ff9b70 #86e0a7 #ffc766 #8ec0ff #dbb9f6 #8fdfef #f5f5f7'),
+  'Alvor Claro': palette('#ffffff', '#1d1d1f', '#ffb02e', '#ffe7bf',
+    '#1d1d1f #c4401a #1f7a45 #8a5800 #1d5fbf #8a3fb0 #0f7a8a #e8e8ed #6e6e73 #d9531f #268c52 #b87500 #2f72d0 #9d52c2 #158c9c #f5f5f7'),
 }
 
 export const themeOf = (name: string): ITheme => THEMES[name] ?? KORA
 
 type UiTheme = { scheme: 'dark' | 'light'; tokens: Record<string, string> }
+
+const UI_ORDER = [
+  'bg-000', 'bg-100', 'bg-200', 'bg-300', 'line', 'line-control',
+  'ink', 'ink-muted', 'ink-faint',
+  'accent', 'accent-strong', 'accent-soft', 'on-accent', 'petrol',
+  'success', 'success-soft', 'warning', 'warning-soft', 'danger', 'danger-soft',
+]
 
 /** Sobrescreve os tokens de src/styles/tokens.css. */
 const UI_THEMES: Record<string, UiTheme> = {
@@ -175,8 +194,8 @@ const UI_THEMES: Record<string, UiTheme> = {
     scheme: 'dark',
     tokens: {
       'bg-000': '#1a1918', 'bg-100': '#201f1d', 'bg-200': '#2a2826', 'bg-300': '#34312e',
-      line: '#3a3632', 'line-control': '#6b645c',
-      ink: '#ebe6df', 'ink-muted': '#a8a199', 'ink-faint': '#857e76',
+      line: '#3a3632', 'line-control': '#716a63',
+      ink: '#ebe6df', 'ink-muted': '#a8a199', 'ink-faint': '#969089',
       accent: '#d97757', 'accent-strong': '#ec9a7c', 'accent-soft': '#3a241b', 'on-accent': '#1d0f09', petrol: '#4a3d33',
       success: '#8fc28a', 'success-soft': '#1d2a1c', warning: '#e0b45c', 'warning-soft': '#2f2614',
       danger: '#e8735a', 'danger-soft': '#331a14',
@@ -188,8 +207,8 @@ const UI_THEMES: Record<string, UiTheme> = {
     tokens: {
       'bg-000': '#15110f', 'bg-100': '#1c1714', 'bg-200': '#251f1b', 'bg-300': '#2f2722',
       line: '#3d332c', 'line-control': '#75655a',
-      ink: '#f0e6dc', 'ink-muted': '#b3a291', 'ink-faint': '#8c7c6e',
-      accent: '#c8643c', 'accent-strong': '#e08a63', 'accent-soft': '#36201a', 'on-accent': '#1a0b05', petrol: '#4d3226',
+      ink: '#f0e6dc', 'ink-muted': '#b3a291', 'ink-faint': '#938477',
+      accent: '#ce7450', 'accent-strong': '#e08a63', 'accent-soft': '#36201a', 'on-accent': '#1a0b05', petrol: '#4d3226',
       success: '#8cbf7f', 'success-soft': '#1b271a', warning: '#d9a94f', 'warning-soft': '#2d2312',
       danger: '#e06a4a', 'danger-soft': '#321812',
       'shadow-pop': '0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px #3d332c',
@@ -199,19 +218,65 @@ const UI_THEMES: Record<string, UiTheme> = {
     scheme: 'light',
     tokens: {
       'bg-000': '#faf8f4', 'bg-100': '#f2eee7', 'bg-200': '#e9e4db', 'bg-300': '#ddd6ca',
-      line: '#d6cfc3', 'line-control': '#9c9285',
-      ink: '#2b2724', 'ink-muted': '#5f5851', 'ink-faint': '#7a7269',
-      accent: '#b85a35', 'accent-strong': '#9a4526', 'accent-soft': '#f3e1d6', 'on-accent': '#ffffff', petrol: '#e6d3c4',
-      success: '#2f7d3a', 'success-soft': '#e2efdf', warning: '#8f6400', 'warning-soft': '#f5ead0',
-      danger: '#c0392b', 'danger-soft': '#f7dfda',
+      line: '#d6cfc3', 'line-control': '#90867a',
+      ink: '#2b2724', 'ink-muted': '#5f5851', 'ink-faint': '#6b645c',
+      accent: '#9e4d2e', 'accent-strong': '#9a4526', 'accent-soft': '#f3e1d6', 'on-accent': '#ffffff', petrol: '#e6d3c4',
+      success: '#2d7838', 'success-soft': '#e2efdf', warning: '#8c6200', 'warning-soft': '#f5ead0',
+      danger: '#b83729', 'danger-soft': '#f7dfda',
       'shadow-pop': '0 12px 32px rgba(60, 40, 20, 0.15), 0 0 0 1px #d6cfc3',
     },
   },
+  // Paletas oficiais de cada projeto levadas para a interface (bg-000 = fundo do terminal).
+  Dracula: ui('dark',
+    '#282a36 #2d2f3d #343746 #424450 #44475a #6878a8 #f8f8f2 #bfc1d4 #989fc5 #bd93f9 #d6bcfc #3a3352 #1e1530 #44475a #50fa7b #1f3b2a #ffb86c #3e3125 #ff6363 #41242b'),
+  'Tokyo Night': ui('dark',
+    '#1a1b26 #1f2030 #24283b #292e42 #2c3148 #656c8b #c0caf5 #a9b1d6 #888fb2 #7aa2f7 #a9c1fb #1f2a4a #0f1220 #33467c #9ece6a #1f2b1d #e0af68 #30281b #f7768e #3a1f2a'),
+  'Catppuccin Mocha': ui('dark',
+    '#1e1e2e #232334 #2a2b3c #313244 #393a4e #6c7086 #cdd6f4 #bac2de #9399b2 #cba6f7 #ddc6fa #372f4f #1e1530 #45475a #a6e3a1 #233227 #f9e2af #3a3528 #f38ba8 #3d2433'),
+  'Catppuccin Latte': ui('light',
+    '#eff1f5 #e6e9ef #dce0e8 #ccd0da #ccd0da #818494 #4c4f69 #5c5f77 #5f6275 #8036e1 #7028e4 #e9dcfb #ffffff #d0d6ea #2d7821 #e0efdc #a1530a #f6e8d3 #c50e36 #f8dbe1'),
+  Nord: ui('dark',
+    '#2e3440 #343a48 #3b4252 #434c5e #3f4758 #7a859b #eceff4 #d8dee9 #a5afc3 #88c0d0 #b5dbe5 #2f4450 #1e242e #434c5e #a3be8c #323d35 #ebcb8b #403b31 #dd8f97 #43303a'),
+  'Gruvbox Dark': ui('dark',
+    '#282828 #32302f #3c3836 #504945 #45403d #84786d #ebdbb2 #d5c4a1 #afa18e #fe8019 #ffa057 #3d2a1c #1d2021 #504945 #b8bb26 #33331c #fabd2f #3d321a #fc6a59 #3f2120'),
+  'Gruvbox Light': ui('light',
+    '#fbf1c7 #f2e5bc #ebdbb2 #d5c4a1 #d5c4a1 #8f8072 #3c3836 #504945 #6b5f57 #af3a03 #8a2e02 #f5d9b5 #fbf1c7 #e0cfa6 #6a660c #e6e3b5 #8c580a #f3e0b0 #9d0006 #f5d0c4'),
+  'Rosé Pine': ui('dark',
+    '#191724 #1f1d2e #26233a #312e46 #2a283e #6e6a86 #e0def4 #908caa #8e89a6 #ebbcba #f5d6d4 #3a2a33 #191724 #403d52 #9ccfd8 #1f3036 #f6c177 #3a3024 #eb6f92 #3d1f2d'),
+  'Rosé Pine Dawn': ui('light',
+    '#faf4ed #f4ede4 #f2e9e1 #e6dcd3 #dfdad9 #898495 #464261 #67637f #6a657c #9e4f4c #8f403d #f6e1dc #ffffff #dfdad9 #286983 #dbe8ea #935e0f #f8ead2 #945164 #f3dfe3'),
+  'GitHub Dark': ui('dark',
+    '#0d1117 #151b23 #212830 #2a313c #2f3742 #656c76 #f0f6fc #9198a1 #899099 #4493f8 #79c0ff #152a45 #0d1117 #264f78 #3fb950 #132b1c #d29922 #2e2410 #f85149 #3b1719'),
+  'GitHub Light': ui('light',
+    '#ffffff #f6f8fa #eff2f5 #e6eaef #d1d9e0 #818b98 #1f2328 #59636e #656d77 #0969da #0550ae #ddf4ff #ffffff #b6e3ff #1a7f37 #dafbe1 #9a6700 #fff8c5 #d1242f #ffebe9'),
+  'One Dark': ui('dark',
+    '#282c34 #2c313a #333842 #3e4452 #383d48 #737a86 #d7dae0 #abb2bf #9ba1ac #61afef #8cc4f5 #1f3347 #1a1d23 #3e4451 #98c379 #27322a #e5c07b #3a3428 #e37b83 #3d2629'),
+  // Temas da casa.
+  Musgo: ui('dark',
+    '#0f1410 #141a15 #1b231c #232d24 #2a352b #5f6f5f #e3eadf #a3b09e #7e8c7a #9cc069 #bcd894 #222d17 #141c0a #2f4325 #86c98a #162a1a #e3b55a #2c2414 #e8806a #2f1a14'),
+  Noite: ui('dark',
+    '#0b0f1c #10152a #161d36 #1e2644 #232c4c #56628e #e1e6f5 #9aa4c7 #7a85ab #8b9cff #b4c0ff #1c2350 #0b0f2a #2a3570 #7fd6a6 #112a22 #f0c068 #2c2414 #ff8a8a #341619'),
+  Névoa: ui('light',
+    '#f5f7fa #eceff4 #e2e7ee #d6dde7 #d1d8e2 #7f8998 #1f2933 #4b5866 #5d6976 #177280 #115e6a #d9eef1 #ffffff #c9e4e8 #2b764a #dcefe3 #8a6100 #f5ebcf #b63d37 #f8e0de'),
+  // Alvor Labs. Âmbar só como destaque; no claro, o âmbar que vira texto é o "âmbar texto" escurecido.
+  Alvor: ui('dark',
+    '#1d1d1f #232325 #2c2c2e #3a3a3c #38383a #6e6e73 #f5f5f7 #a1a1a6 #939397 #ffb02e #ffc766 #3a2c14 #1d1d1f #4a3c22 #5fd38a #16291d #ffd25e #33290f #ff7a45 #3a1c10'),
+  'Alvor Claro': ui('light',
+    '#ffffff #fbfbfd #f5f5f7 #e8e8ed #e5e5ea #919195 #1d1d1f #6e6e73 #6e6e73 #9a6200 #7a4d00 #fff3e2 #ffffff #ffe7bf #1f7a45 #e3f4e9 #8a5800 #fff3e2 #bc3d19 #fde6de'),
+}
+
+/** Monta um tema de interface a partir dos 20 tokens de cor, na ordem de UI_ORDER. */
+function ui(scheme: 'dark' | 'light', colors: string): UiTheme {
+  const values = colors.split(' ')
+  const tokens: Record<string, string> = Object.fromEntries(UI_ORDER.map((t, i) => [t, values[i]]))
+  const shadow = scheme === 'dark' ? 'rgba(0, 0, 0, 0.5)' : 'rgba(20, 30, 40, 0.15)'
+  tokens['shadow-pop'] = `0 12px 32px ${shadow}, 0 0 0 1px ${tokens.line}`
+  return { scheme, tokens }
 }
 
 const UI_TOKENS = [...new Set(Object.values(UI_THEMES).flatMap((t) => Object.keys(t.tokens)))]
 
-/** Aplica (ou desfaz, para temas só de terminal) as cores da interface do tema. */
+/** Aplica as cores da interface do tema (ou volta às do Kora). */
 export function applyUiTheme(name: string) {
   const root = document.documentElement.style
   const ui = UI_THEMES[name]
@@ -224,3 +289,12 @@ export function applyUiTheme(name: string) {
 }
 
 export const changesUi = (name: string) => name in UI_THEMES
+
+/** Temas da interface; "Kora" é o padrão de src/styles/tokens.css. */
+export const UI_THEME_NAMES = ['Kora', ...Object.keys(UI_THEMES)]
+
+/** Valor do tema do terminal que segue o tema da interface (todo tema de interface tem paleta de terminal). */
+export const FOLLOW_UI = 'auto'
+
+/** Paleta do terminal: a escolhida, ou a do tema da interface quando segue a interface. */
+export const terminalTheme = (theme: string, uiTheme: string): ITheme => themeOf(theme === FOLLOW_UI ? uiTheme : theme)

@@ -41,6 +41,12 @@ fn icon<R: Runtime, M: Manager<R>>(manager: &M, waiting: bool) -> Option<Image<'
     Image::from_bytes(if waiting { WAITING[index] } else { NORMAL[index] }).ok()
 }
 
+/// Traz a janela para a frente (clique numa notificação).
+#[tauri::command]
+pub fn show_window(app: AppHandle) {
+    show_main(&app);
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();

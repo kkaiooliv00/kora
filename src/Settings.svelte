@@ -4,7 +4,7 @@
   import { app, type Profile, type Snippet } from './lib/state.svelte'
   import { ACTIONS } from './lib/commands'
   import { FONTS, fontOf, fontStack } from './lib/fonts'
-  import { THEMES, changesUi, themeOf } from './lib/themes'
+  import { FOLLOW_UI, THEMES, UI_THEME_NAMES, terminalTheme } from './lib/themes'
   import { checkBudget } from './lib/budget'
   import { CATEGORIES, DEFAULT_PERMISSIONS, type Permissions, type Policy } from './lib/permissions'
 
@@ -30,7 +30,7 @@
   let draft = $state({ ...app.settings })
   let budget = $state({ ...app.settings.budget })
   let loop = $state({ ...app.settings.loop })
-  const preview = $derived(themeOf(draft.theme))
+  const preview = $derived(terminalTheme(draft.theme, draft.uiTheme))
   let customFont = $state(false)
   let permissions = $state<Permissions>(structuredClone($state.snapshot(app.settings.permissions)))
   let profilesText = $state(JSON.stringify(app.profiles, null, 2))
@@ -273,14 +273,19 @@
         </div>
       {:else if section === 'terminal'}
         <h2>terminal e aparência</h2>
-        <p class="lead">Temas marcados com ◐ mudam a interface inteira; os outros mudam só o terminal.</p>
+        <p class="lead">O tema da interface muda o app inteiro; o do terminal, só as cores dos chats.</p>
         <div class="grid">
+          <label class="field">
+            Tema da interface
+            <select bind:value={draft.uiTheme}>
+              {#each UI_THEME_NAMES as name (name)}<option value={name}>{name}</option>{/each}
+            </select>
+          </label>
           <label class="field">
             Tema do terminal
             <select bind:value={draft.theme}>
-              {#each Object.keys(THEMES) as name (name)}
-                <option value={name}>{changesUi(name) ? `◐ ${name}` : name}</option>
-              {/each}
+              <option value={FOLLOW_UI}>Igual à interface ({draft.uiTheme})</option>
+              {#each Object.keys(THEMES) as name (name)}<option value={name}>{name}</option>{/each}
             </select>
             <span class="swatches" style:background={preview.background} style:color={preview.foreground} aria-hidden="true">
               <span class="sample">›_</span>
