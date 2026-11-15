@@ -1,6 +1,6 @@
 [package]
 name = "kora"
-version = "0.14.0"
+version = "0.16.0"
 description = "Terminal leve para agentes de IA"
 authors = ["kkaiooliv00"]
 license = ""
@@ -15,7 +15,7 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.7.3" }
+tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
 serde_json = "1.0"
