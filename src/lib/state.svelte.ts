@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { DEFAULT_KEYS } from './keys'
 import { DEFAULT_PERMISSIONS, type Permissions } from './permissions'
+import { FOLLOW_UI, changesUi } from './themes'
 import { dismiss, toast } from './toasts.svelte'
 import type { Queue } from './queue'
 
@@ -58,6 +59,8 @@ export interface Chat {
   branch?: string
   /** Shell que roda o projeto para o chat `runOf` (mesma pasta; não é dono do worktree). */
   runOf?: string
+  /** Agente revisor das mudanças do chat `reviewOf` (mesma pasta; não é dono do worktree). */
+  reviewOf?: string
   /** Fora da barra lateral (fica em "chats arquivados"); a conversa e o worktree continuam. */
   archived?: boolean
   /** Você renomeou: o título da sessão do Claude não sobrescreve mais o nome. */
@@ -78,7 +81,10 @@ export interface Settings {
   version: number
   fontFamily: string
   fontSize: number
+  /** Tema do terminal; "auto" segue o tema da interface. */
   theme: string
+  /** Tema da interface (o app inteiro). */
+  uiTheme: string
   /** Caminho do navegador; vazio procura o Chrome. */
   browser: string
   /** Comando do editor; recebe a pasta do projeto no fim. */
@@ -156,13 +162,14 @@ const DEFAULT_PROFILES: Profile[] = [
 ]
 
 const LEGACY_FONT = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace'
-const SETTINGS_VERSION = 3
+const SETTINGS_VERSION = 4
 
 const DEFAULT_SETTINGS: Settings = {
   version: SETTINGS_VERSION,
   fontFamily: '"JetBrains Mono", ui-monospace, Consolas, monospace',
   fontSize: 13,
-  theme: 'Kora',
+  theme: FOLLOW_UI,
+  uiTheme: 'Kora',
   browser: '',
   editor: 'code',
   keys: DEFAULT_KEYS,
@@ -295,13 +302,18 @@ function migrateSettings(settings: Settings): Settings {
   if (from < 2) {
     next = {
       ...next,
-      theme: next.theme === 'Grafite' ? DEFAULT_SETTINGS.theme : next.theme,
+      theme: next.theme === 'Grafite' ? 'Kora' : next.theme,
       fontFamily: next.fontFamily === LEGACY_FONT ? DEFAULT_SETTINGS.fontFamily : next.fontFamily,
       fontSize: next.fontSize === 14 ? DEFAULT_SETTINGS.fontSize : next.fontSize,
     }
   }
   // v3: Ctrl+Shift+A virou "Aprovar sempre"; o painel de agentes foi para outro atalho.
   if (from < 3 && next.keys.agents === 'Ctrl+Shift+A') next = { ...next, keys: { ...next.keys, agents: DEFAULT_KEYS.agents } }
+  // v4: tema da interface separado do tema do terminal. Quem usava um tema "◐" (ou o Kora) segue com ele nos dois.
+  if (from < 4) {
+    const follows = next.theme === 'Kora' || changesUi(next.theme)
+    next = { ...next, uiTheme: follows ? next.theme : 'Kora', theme: follows ? FOLLOW_UI : next.theme }
+  }
   return { ...next, version: SETTINGS_VERSION }
 }
 
@@ -530,13 +542,13 @@ export async function removeChat(id: string, confirm = true) {
   })
   if (!sure) return
   closePane(id)
-  // O shell de "rodar" deste chat usa a mesma pasta: sai junto.
-  for (const run of app.chats.filter((c) => c.runOf === id)) closePane(run.id)
-  app.chats = app.chats.filter((c) => c.id !== id && c.runOf !== id)
+  // O shell de "rodar" e o revisor deste chat usam a mesma pasta: saem junto.
+  for (const guest of app.chats.filter((c) => guestOf(c) === id)) closePane(guest.id)
+  app.chats = app.chats.filter((c) => c.id !== id && guestOf(c) !== id)
   delete app.pendingPrompt[id]
   delete app.touched[id]
-  // O shell de "rodar" usa a pasta do chat, mas o worktree não é dele.
-  if (!chat.cwd || chat.runOf) return
+  // O shell de "rodar" e o revisor usam a pasta do chat, mas o worktree não é deles.
+  if (!chat.cwd || guestOf(chat)) return
   const remove = await ask(`Apagar também o worktree em ${chat.cwd}? A branch ${chat.branch} continua no repositório.`, {
     title: 'Remover chat',
     kind: 'warning',
@@ -545,6 +557,9 @@ export async function removeChat(id: string, confirm = true) {
 }
 
 export const chatDir = (chat: Chat) => chat.cwd ?? projectOf(chat)?.path
+
+/** Chat que trabalha na pasta de outro (shell de "rodar" ou revisor): o id do dono. */
+export const guestOf = (chat: Chat) => chat.runOf ?? chat.reviewOf
 
 /** "projeto / grupo" (cabeçalho de painel, uso por chat, título da janela). */
 export function whereOf(chat: Chat): string {

@@ -65,7 +65,7 @@
     type Tab,
     type Layout,
   } from './lib/state.svelte'
-  import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents, resumeAllLoops } from './lib/automation'
+  import { AGENT_MESSAGE_LIMIT, onHookStatus, resumeAgents, resumeAllLoops, watchNotifications } from './lib/automation'
   import { openActiveInEditor } from './lib/automation'
   import { terminals } from './lib/terminals'
   import {
@@ -82,7 +82,7 @@
   import { handleCli, type CliRequest } from './lib/bridge'
   import { ACTIONS, openPalette } from './lib/commands'
   import { menuState } from './lib/menu.svelte'
-  import { applyUiTheme, themeOf } from './lib/themes'
+  import { applyUiTheme, terminalTheme } from './lib/themes'
   import { watchStats } from './lib/stats.svelte'
   import { checkBudget, watchBudget } from './lib/budget'
   import { SIDEBAR, clampSidebar, dragDivider, paneSizes } from './lib/resize'
@@ -109,7 +109,9 @@
   /** Atalhos globais: rodam antes do terminal receber a tecla. */
   function onKey(e: KeyboardEvent) {
     // Esc fecha qualquer modal aqui, na captura: se o foco estiver no terminal, o xterm engoliria a tecla.
-    if (e.key === 'Escape' && app.modal && !menuState.open) {
+    // Campos marcados com data-own-escape usam o Esc para si (ex.: cancelar um comentário no diff).
+    const ownEscape = e.target instanceof HTMLElement && !!e.target.closest('[data-own-escape]')
+    if (e.key === 'Escape' && app.modal && !menuState.open && !ownEscape) {
       e.preventDefault()
       e.stopPropagation()
       app.modal = null
@@ -152,7 +154,9 @@
     const stopBudget = watchBudget()
     const stopUsage = watchUsageToday()
     const stopLimits = watchUsageLimits()
+    const stopNotifications = watchNotifications().catch((e) => (fail('Notificações', e), () => {}))
     return () => {
+      stopNotifications.then((stop) => stop())
       stopUsage()
       stopLimits()
       stopStats()
@@ -171,7 +175,7 @@
     saveTimer = setTimeout(() => save(config, state), SAVE_DELAY_MS)
   })
 
-  $effect(() => applyUiTheme(app.settings.theme))
+  $effect(() => applyUiTheme(app.settings.uiTheme))
 
   const waitingNames = $derived(
     Object.entries(app.status)
@@ -491,7 +495,7 @@
       class="terms"
       bind:this={termsEl}
       bind:clientWidth={termsWidth}
-      style:--term-bg={themeOf(app.settings.theme).background}
+      style:--term-bg={terminalTheme(app.settings.theme, app.settings.uiTheme).background}
       ondragover={(e) => onDragOver(e)}
       ondragleave={onDragLeave}
       ondrop={onDrop}
